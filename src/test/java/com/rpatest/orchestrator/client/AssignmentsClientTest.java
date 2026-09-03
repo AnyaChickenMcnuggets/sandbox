@@ -57,6 +57,32 @@ class AssignmentsClientTest {
     }
 
     @Test
+    void createFallsBackToListLookupWhenPostReturnsEmptyBody() {
+        wireMockServer.stubFor(post(urlEqualTo("/api/Assignments/v2")).willReturn(aResponse().withStatus(200)));
+        wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/v2"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [{"id":7,"name":"other","description":null,"rpaProjectId":1,"status":0,
+                                  "startedAt":null,"stateChangedAt":null,"lastErrorMsg":null},
+                                 {"id":42,"name":"job","description":"d","rpaProjectId":7,"status":0,
+                                  "startedAt":null,"stateChangedAt":null,"lastErrorMsg":null}]""")));
+
+        AssignmentDto result = client.create(AssignmentCreateDto.manualRun("job", "d", 7));
+
+        assertThat(result.id()).isEqualTo(42);
+    }
+
+    @Test
+    void createThrowsWhenFallbackLookupFindsNothing() {
+        wireMockServer.stubFor(post(urlEqualTo("/api/Assignments/v2")).willReturn(aResponse().withStatus(200)));
+        wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/v2"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody("[]")));
+
+        assertThatThrownBy(() -> client.create(AssignmentCreateDto.manualRun("job", "d", 7)))
+                .isInstanceOf(OrchestratorApiException.class);
+    }
+
+    @Test
     void getReturnsAssignmentById() {
         wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/v2/42"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")

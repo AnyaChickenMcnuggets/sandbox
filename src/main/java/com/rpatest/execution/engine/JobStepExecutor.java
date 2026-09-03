@@ -45,8 +45,12 @@ public class JobStepExecutor implements StepExecutor {
     public void execute(StepRun stepRun, ScenarioStep step) {
         JobStepConfig config = objectMapper.convertValue(step.getConfig(), JobStepConfig.class);
         try {
+            // Имя должно быть уникальным для прогона: create() может упасть на поиск по имени
+            // (см. OrchestratorClientSupport-фолбэк в AssignmentsClient), а при повторном запуске
+            // того же сценария имя шага само по себе не уникально.
+            String assignmentName = step.getName() + " #" + stepRun.getScenarioRunId() + "." + step.getId();
             AssignmentDto created = assignmentsPort.create(
-                    AssignmentCreateDto.manualRun(step.getName(), step.getName(), config.rpaProjectId()));
+                    AssignmentCreateDto.manualRun(assignmentName, step.getName(), config.rpaProjectId()));
             stepRun.setOrchestratorAssignmentId(created.id());
 
             applyArguments(created.id(), config.argumentsOrEmpty());
