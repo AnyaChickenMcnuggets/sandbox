@@ -1,19 +1,24 @@
 package com.rpatest.orchestrator.client;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.delete;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.put;
-import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.rpatest.orchestrator.dto.EnqueueExchangeQueueDto;
+import com.rpatest.orchestrator.dto.ExchangeQueueCreateDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
-import com.rpatest.orchestrator.dto.PageDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
+import com.rpatest.orchestrator.dto.PageDto;
+import com.rpatest.orchestrator.exception.OrchestratorApiException;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +46,44 @@ class ExchangeQueuesClientTest {
     @AfterEach
     void tearDown() {
         wireMockServer.stop();
+    }
+
+    @Test
+    void createPostsQueueDefinition() {
+        wireMockServer.stubFor(post(urlEqualTo("/api/ExchangeQueues")).willReturn(aResponse().withStatus(200)));
+
+        client.create(ExchangeQueueCreateDto.of("q1", "desc"));
+
+        wireMockServer.verify(1, com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(urlEqualTo("/api/ExchangeQueues")));
+    }
+
+    @Test
+    void listReturnsAllQueues() {
+        UUID id = UUID.randomUUID();
+        wireMockServer.stubFor(get(urlEqualTo("/api/ExchangeQueues"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("[{\"id\":\"" + id + "\",\"name\":\"q1\",\"description\":null,\"countItems\":0,\"countReadedItems\":0}]")));
+
+        List<ExchangeQueueDto> result = client.list();
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void deleteCallsExpectedEndpoint() {
+        UUID id = UUID.randomUUID();
+        wireMockServer.stubFor(delete(urlEqualTo("/api/ExchangeQueues/" + id)).willReturn(aResponse().withStatus(200)));
+
+        client.delete(id);
+
+        wireMockServer.verify(1, com.github.tomakehurst.wiremock.client.WireMock.deleteRequestedFor(urlEqualTo("/api/ExchangeQueues/" + id)));
+    }
+
+    @Test
+    void wrapsServerErrorIntoOrchestratorApiException() {
+        wireMockServer.stubFor(get(urlEqualTo("/api/ExchangeQueues")).willReturn(aResponse().withStatus(500)));
+
+        assertThatThrownBy(() -> client.list()).isInstanceOf(OrchestratorApiException.class);
     }
 
     @Test

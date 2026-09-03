@@ -61,13 +61,32 @@ Backend для автоматизации тестирования задани�
 - [x] `GET /api/v1/runs/{runId}/steps/{stepId}/queue-items` — аудит очереди
 - [x] End-to-end тест "job → queue → job"
 
-## Sprint 8 — Hardening — IN PROGRESS
-- [ ] Добор покрытия JaCoCo до целевого порога (контроллеры, конфиг, edge cases retry/ошибок)
-- [ ] Финализация `architecture.md`/`agents.md`
-- [ ] Ревью и чистка кода
+## Sprint 8 — Hardening — DONE
+- [x] Добор покрытия тестами: `JobStepExecutor`, `QueueStepExecutor`, `StatusPoller`,
+      `ExecutionService`, `CleanupService`, `QueueAuditService`, `RpaProjectVariablesClient`,
+      недостающие ветки `ExchangeQueuesClient`/`RunController`/`GlobalExceptionHandler`,
+      `OrchestratorTrustStoreFactory`, `ScenarioStepEdgeId`. Итог: 98 тестов,
+      **87.8%** instruction coverage, `mvn verify` (JaCoCo-порог 80%) — зелёный.
+- [x] Реальный end-to-end прогон против стенда пользователя подтверждён (job → SUCCEEDED)
+- [x] Финализация `architecture.md`/`agents.md` по итогам реальных находок (эндпоинты v2,
+      санитайзинг имён, LocalDateTime вместо OffsetDateTime, фолбэк по имени при пустом ответе POST)
 
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
 - Статус "успех/ошибка" транзакции очереди выводится из `lastEventType` элемента очереди —
   финальный маппинг событий уточняется по факту реальных данных оркестратора.
+- `POST /api/ExchangeQueues` (создание очереди) подтверждён пользователем как рабочий, но ещё не
+  проверен end-to-end на реальном стенде (в отличие от Assignments) — стоит перепроверить при
+  первом реальном прогоне сценария с шагом QUEUE.
+- `StatusPoller`/`ExecutionService.stopRun` не считают `PAUSED` терминальным статусом: после ручной
+  остановки задания (`PUT /Assignments/{id}/Stop`) поллер в других (ещё не остановленных) шагах
+  продолжит ждать `Complete`/`Error` до таймаута — не критично, но стоит уточнить у оркестратора,
+  в какой статус реально переходит остановленное задание.
+- `ScenarioStepRepositoryIT` (Testcontainers) не запускался в этой сессии — в текущем окружении
+  нет Docker. Прогнать в CI/локально с Docker перед мёржем.
+
+## Backlog (за рамками текущего скоупа)
+- Аутентификация/авторизация собственного REST API (осознанно не делали на этом этапе).
+- Строгая проверка несовпавших ключей в `JobStepConfig.arguments` (сейчас молча игнорируются).
+- UI/дашборд поверх REST API для визуального конструирования сценариев и просмотра прогонов.
