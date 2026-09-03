@@ -1,1 +1,2 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- Первоначальная миграция. Расширение pgcrypto не требуется: UUID (assignment/queue id и т.п.)
+-- всегда приходят от оркестратора, а не генерируются в Postgres.
