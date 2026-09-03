@@ -1,0 +1,70 @@
+# Guide for future development (agents.md)
+
+Правила для тех, кто (человек или агент) продолжает разработку этого сервиса.
+
+## Структура пакетов
+
+```
+com.rpatest
+├── orchestrator/{auth,client,dto,exception}   # интеграция с Primo RPA Orchestrator
+├── scenario/{domain,repository,service,web}   # CRUD сценариев (наша БД)
+├── execution/{domain,engine,repository,web}   # запуск сценариев, статусы, cleanup
+└── config/                                    # инфраструктурная конфигурация
+```
+
+Правило: `orchestrator/*` не знает про `scenario`/`execution` (только HTTP-интеграция).
+`scenario`/`execution` не делают прямых HTTP-вызовов — только через `*Port`-интерфейсы из
+`orchestrator`.
+
+## Как добавить новый эндпоинт оркестратора
+
+1. Найти операцию в [orc_swagger.json](orc_swagger.json) (`paths./api/...`), выписать
+   requestBody/response `$ref` на `components.schemas`.
+2. Добавить DTO в `orchestrator/dto` — поля 1:1 со схемой (тип, `nullable`), без лишней логики.
+3. Добавить метод в соответствующий `*Port`-интерфейс и реализовать в `*Client`
+   (`RestClient`, см. `AssignmentsClient` как образец: `.uri(...).header(...).retrieve()`).
+4. Обернуть непредвиденные ошибки в `OrchestratorApiException` (сетевые/5xx) — НЕ глотать
+   молча.
+5. Написать WireMock-тест: застабить `orc_swagger.json`-совместимый ответ, проверить
+   маппинг DTO и обработку ошибочных статусов (401/404/500).
+
+## DAG сценария
+
+- `scenario_step_edge(from_step_id, to_step_id)` — рёбра. Корневые шаги — без входящих рёбер.
+  Разветвление — несколько исходящих рёбер у одного шага (см. `ScenarioExecutionEngine`).
+- При создании/редактировании сценария `ScenarioService` обязан проверять отсутствие циклов
+  (топологическая сортировка) — не убирайте эту проверку, движок исполнения не рассчитан на циклы.
+- Новый тип шага (кроме `JOB`/`QUEUE`) добавляется как ещё одна реализация `StepExecutor` +
+  значение в `ScenarioStepType`, без изменения `ScenarioExecutionEngine`.
+
+## Миграции Flyway
+
+- Файлы `src/main/resources/db/migration/V{N}__{name}.sql`, только вперёд (не редактировать уже
+  примененные `V*`-файлы, добавлять новые).
+- Каждая новая сущность/колонка — отдельная миграция, покрытая repository-тестом на
+  Testcontainers.
+
+## Секреты и логирование
+
+- Пароль/логин оркестратора — только в `orchestrator.credentials.*` (Jasypt `ENC(...)`),
+  никогда в коде/тестах в открытом виде и никогда в БД.
+- JWT-токен не логировать и не персистить — только `TokenProvider` в памяти.
+- В `logback`/`application.yml` не включать уровень `DEBUG` для `org.springframework.web.client`
+  в проде — там могут светиться заголовки авторизации.
+
+## Тесты и покрытие
+
+- Каждый новый `*Client`/`*Port` — WireMock-тест на happy path + минимум один код ошибки.
+- Каждый новый `Service`-метод — unit-тест (моки портов/репозиториев) + edge case (не найдено,
+  невалидное состояние).
+- Каждый новый `Controller`-метод — MockMvc-тест (успех + 4xx).
+- Перед PR — `mvn clean verify`, JaCoCo-порог не должен упасть.
+
+## Стиль кода
+
+- SOLID: `*Port`-интерфейсы держат сервисы независимыми от HTTP-деталей (DIP), новый тип шага —
+  через `StepExecutor` (OCP), контроллеры/сервисы/клиенты — одна ответственность каждый (SRP).
+- Без комментариев "что делает код" — только там, где неочевидна причина (например, почему retry
+  не применяется к POST).
+- Конфигурируемость — новые интервалы/таймауты/лимиты только через `application.yml` +
+  `@ConfigurationProperties`, не хардкодить.

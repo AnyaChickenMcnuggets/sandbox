@@ -1,0 +1,81 @@
+spring:
+  application:
+    name: rpa-test-automation
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:rpa_test_automation}
+    username: ${DB_USER:rpa_test}
+    password: ${DB_PASSWORD:rpa_test}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+
+orchestrator:
+  base-url: ${ORCHESTRATOR_BASE_URL:http://localhost:8090}
+  credentials:
+    username: ${ORCHESTRATOR_USERNAME:}
+    password: ${ORCHESTRATOR_PASSWORD:}
+    robot-edition: ${ORCHESTRATOR_ROBOT_EDITION:0}
+  http:
+    connect-timeout: 5s
+    read-timeout: 30s
+  polling:
+    interval: 5s
+    timeout: 30m
+
+resilience4j:
+  retry:
+    instances:
+      orchestrator-read:
+        max-attempts: 3
+        wait-duration: 500ms
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - java.io.IOException
+          - org.springframework.web.client.ResourceAccessException
+      orchestrator-write:
+        max-attempts: 2
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - org.springframework.web.client.ResourceAccessException
+  circuitbreaker:
+    instances:
+      orchestrator:
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 5
+
+execution:
+  async:
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 100
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+jasypt:
+  encryptor:
+    algorithm: PBEWITHHMACSHA512ANDAES_256
+    iv-generator-classname: org.jasypt.iv.RandomIvGenerator
+    # Реальный пароль шифрования секретов передаётся ТОЛЬКО через переменную окружения
+    # JASYPT_ENCRYPTOR_PASSWORD в проде/стейджинге, значение по умолчанию годится лишь для локальной разработки.
+    password: ${JASYPT_ENCRYPTOR_PASSWORD:local-dev-only-change-me}

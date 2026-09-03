@@ -1,0 +1,17 @@
+spring:
+  flyway:
+    enabled: true
+
+orchestrator:
+  base-url: http://localhost:${wiremock.server.port:0}
+  credentials:
+    username: test-user
+    password: test-password
+    robot-edition: 0
+  polling:
+    interval: 50ms
+    timeout: 5s
+
+jasypt:
+  encryptor:
+    password: test-secret-key
