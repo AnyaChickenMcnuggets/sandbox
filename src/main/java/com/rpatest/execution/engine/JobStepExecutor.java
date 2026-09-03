@@ -11,6 +11,7 @@ import com.rpatest.orchestrator.dto.AssignmentStatus;
 import com.rpatest.orchestrator.dto.RpaProjectVariableDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableEditByIdDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
+import com.rpatest.orchestrator.util.OrchestratorNames;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.util.List;
@@ -45,10 +46,11 @@ public class JobStepExecutor implements StepExecutor {
     public void execute(StepRun stepRun, ScenarioStep step) {
         JobStepConfig config = objectMapper.convertValue(step.getConfig(), JobStepConfig.class);
         try {
-            // Имя должно быть уникальным для прогона: create() может упасть на поиск по имени
-            // (см. OrchestratorClientSupport-фолбэк в AssignmentsClient), а при повторном запуске
-            // того же сценария имя шага само по себе не уникально.
-            String assignmentName = step.getName() + " #" + stepRun.getScenarioRunId() + "." + step.getId();
+            // Оркестратор принимает в имени только латиницу/цифры/подчёркивание. Имя также должно
+            // быть уникальным для прогона: create() может упасть на поиск по имени (см. фолбэк в
+            // AssignmentsClient), а при повторном запуске того же сценария имя шага не уникально.
+            String assignmentName = OrchestratorNames.sanitize(
+                    step.getName() + "_" + stepRun.getScenarioRunId() + "_" + step.getId());
             AssignmentDto created = assignmentsPort.create(
                     AssignmentCreateDto.manualRun(assignmentName, step.getName(), config.rpaProjectId()));
             stepRun.setOrchestratorAssignmentId(created.id());

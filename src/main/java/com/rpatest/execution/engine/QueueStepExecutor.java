@@ -9,6 +9,7 @@ import com.rpatest.orchestrator.dto.EnqueueExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueCreateDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
+import com.rpatest.orchestrator.util.OrchestratorNames;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import org.springframework.stereotype.Component;
@@ -32,18 +33,20 @@ public class QueueStepExecutor implements StepExecutor {
     @Override
     public void execute(StepRun stepRun, ScenarioStep step) {
         QueueStepConfig config = objectMapper.convertValue(step.getConfig(), QueueStepConfig.class);
+        // Оркестратор принимает в имени очереди только латиницу/цифры/подчёркивание.
+        String queueName = OrchestratorNames.sanitize(config.name());
         try {
             exchangeQueuesPort.create(new ExchangeQueueCreateDto(
-                    config.name(), config.description(), true, config.ttl(), config.maxRetray(), false, true));
+                    queueName, config.description(), true, config.ttl(), config.maxRetray(), false, true));
 
-            ExchangeQueueDto queue = exchangeQueuesPort.findByName(config.name())
+            ExchangeQueueDto queue = exchangeQueuesPort.findByName(queueName)
                     .orElseThrow(() -> new StepExecutionException(
-                            "Очередь '" + config.name() + "' не найдена в оркестраторе сразу после создания"));
+                            "Очередь '" + queueName + "' не найдена в оркестраторе сразу после создания"));
             stepRun.setOrchestratorQueueId(queue.id());
 
             for (TransactionTemplate transaction : config.transactionsOrEmpty()) {
                 exchangeQueuesPort.enqueue(
-                        config.name(),
+                        queueName,
                         EnqueueExchangeQueueDto.of(transaction.naturalKey(), transaction.value(), transaction.metadata()));
             }
         } catch (OrchestratorApiException e) {
