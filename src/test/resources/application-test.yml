@@ -7,7 +7,6 @@ orchestrator:
   credentials:
     username: test-user
     password: test-password
-    robot-edition: 0
   polling:
     interval: 50ms
     timeout: 5s

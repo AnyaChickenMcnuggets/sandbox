@@ -46,7 +46,6 @@ public class OrchestratorProperties {
     public static class Credentials {
         private String username;
         private String password;
-        private int robotEdition;
 
         public String getUsername() {
             return username;
@@ -62,14 +61,6 @@ public class OrchestratorProperties {
 
         public void setPassword(String password) {
             this.password = password;
-        }
-
-        public int getRobotEdition() {
-            return robotEdition;
-        }
-
-        public void setRobotEdition(int robotEdition) {
-            this.robotEdition = robotEdition;
         }
     }
 

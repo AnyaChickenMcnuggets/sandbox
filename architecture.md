@@ -12,7 +12,7 @@
 | Аргументы задания | `RpaProjectVariables` (`/Assignment/{id}`) | `JobStepConfig.arguments` |
 | Очередь транзакций | `ExchangeQueues` | `ScenarioStep(type=QUEUE)` → `StepRun.orchestratorQueueId` |
 | Транзакция очереди | `ExchangeQueueItem` / `ExchangeQueueValueDto` | `QueueStepConfig.transactions` / `QueueItemResult` |
-| Аутентификация | `POST /api/Account` (`LoginDto`) → JWT | `TokenProvider` |
+| Аутентификация | `POST /api/Account` ({userName, password}) → `{token}` | `TokenProvider` |
 
 ## Слои
 
@@ -89,6 +89,8 @@ scenario_run 1───* step_run 1───* queue_item_result
 - `AuthorizationInterceptor` (RestClient interceptor) добавляет заголовок `Authorization: Bearer
   <token>` ко всем запросам к оркестратору; при ответе `401` — один раз форсирует релогин и
   повторяет запрос.
+- Тело запроса — только `{userName, password}` (подтверждено на реальном стенде: `robotEdition`/
+  `refreshToken` из схемы `LoginDto` в swagger не требуются), ответ — `{"token": "<jwt>"}`.
 - Логин/пароль читаются из `application.yml` (`orchestrator.credentials.*`), значения
   зашифрованы Jasypt (`ENC(...)`), реальные секреты передаются через переменные окружения
   (`JASYPT_ENCRYPTOR_PASSWORD` — пароль шифрования, не хранится в репозитории). Токен и пароль

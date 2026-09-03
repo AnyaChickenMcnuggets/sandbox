@@ -1,9 +1,9 @@
 package com.rpatest.orchestrator.dto;
 
-/** Mirrors LTools.Dto.Orchestrator.Security.LoginDto from orc_swagger.json. */
-public record LoginDto(String userName, String password, int robotEdition, String refreshToken) {
-
-    public static LoginDto of(String userName, String password, int robotEdition) {
-        return new LoginDto(userName, password, robotEdition, null);
-    }
+/**
+ * Тело запроса POST /api/Account. Схема LTools.Dto.Orchestrator.Security.LoginDto в swagger
+ * дополнительно объявляет robotEdition/refreshToken, но подтверждено на реальном стенде, что
+ * оркестратор аутентифицирует только по userName/password — лишние поля не отправляем.
+ */
+public record LoginDto(String userName, String password) {
 }

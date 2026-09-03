@@ -55,7 +55,7 @@ public class OrchestratorAuthService {
     @Retry(name = "orchestrator-write")
     private String login() {
         OrchestratorProperties.Credentials credentials = properties.getCredentials();
-        LoginDto request = LoginDto.of(credentials.getUsername(), credentials.getPassword(), credentials.getRobotEdition());
+        LoginDto request = new LoginDto(credentials.getUsername(), credentials.getPassword());
         try {
             String rawBody = authRestClient.post()
                     .uri("/api/Account")

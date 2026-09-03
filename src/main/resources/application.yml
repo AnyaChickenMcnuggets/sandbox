@@ -24,7 +24,6 @@ orchestrator:
   credentials:
     username: ${ORCHESTRATOR_USERNAME:}
     password: ${ORCHESTRATOR_PASSWORD:}
-    robot-edition: ${ORCHESTRATOR_ROBOT_EDITION:0}
   http:
     connect-timeout: 5s
     read-timeout: 30s
