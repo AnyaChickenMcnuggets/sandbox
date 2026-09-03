@@ -44,7 +44,7 @@ class AssignmentsClientTest {
 
     @Test
     void createReturnsParsedAssignment() {
-        wireMockServer.stubFor(post(urlEqualTo("/api/Assignments"))
+        wireMockServer.stubFor(post(urlEqualTo("/api/Assignments/v2"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {"id":42,"name":"job","description":"d","rpaProjectId":7,"status":0,
@@ -58,7 +58,7 @@ class AssignmentsClientTest {
 
     @Test
     void getReturnsAssignmentById() {
-        wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/42"))
+        wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/v2/42"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {"id":42,"name":"job","description":"d","rpaProjectId":7,"status":2,
@@ -89,7 +89,7 @@ class AssignmentsClientTest {
 
     @Test
     void wrapsServerErrorIntoOrchestratorApiException() {
-        wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/99")).willReturn(aResponse().withStatus(500)));
+        wireMockServer.stubFor(get(urlEqualTo("/api/Assignments/v2/99")).willReturn(aResponse().withStatus(500)));
 
         assertThatThrownBy(() -> client.get(99)).isInstanceOf(OrchestratorApiException.class);
     }

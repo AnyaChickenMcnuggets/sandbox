@@ -22,7 +22,7 @@ public class AssignmentsClient implements AssignmentsPort {
     @CircuitBreaker(name = "orchestrator")
     public AssignmentDto create(AssignmentCreateDto request) {
         return OrchestratorClientSupport.execute("create assignment", () -> restClient.post()
-                .uri("/api/Assignments")
+                .uri("/api/Assignments/v2")
                 .body(request)
                 .retrieve()
                 .body(AssignmentDto.class));
@@ -33,7 +33,7 @@ public class AssignmentsClient implements AssignmentsPort {
     @CircuitBreaker(name = "orchestrator")
     public AssignmentDto get(int assignmentId) {
         return OrchestratorClientSupport.execute("get assignment " + assignmentId, () -> restClient.get()
-                .uri("/api/Assignments/{id}", assignmentId)
+                .uri("/api/Assignments/v2/{id}", assignmentId)
                 .retrieve()
                 .body(AssignmentDto.class));
     }

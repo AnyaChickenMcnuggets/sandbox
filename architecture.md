@@ -63,10 +63,11 @@ scenario_run 1───* step_run 1───* queue_item_result
    запускает `ScenarioExecutionEngine.execute(run)`.
 2. Движок находит корневые шаги DAG (без входящих рёбер) и исполняет их через `StepExecutor`
    (Strategy: `JobStepExecutor` / `QueueStepExecutor`).
-3. `JobStepExecutor`: создаёт `Assignment` (`POST /api/Assignments`), выставляет аргументы
+3. `JobStepExecutor`: создаёт `Assignment` (`POST /api/Assignments/v2` — эндпоинт v1 без версии в
+   swagger присутствует, но не актуален на реальном стенде), выставляет аргументы
    (`PUT /api/RpaProjectVariables/Assignment/{id}`), стартует (`PUT /api/Assignments/{id}/Start`),
    передаёт управление `StatusPoller`, который с заданным интервалом (`orchestrator.polling.
-   interval`) опрашивает `GET /api/Assignments/{id}` до терминального статуса
+   interval`) опрашивает `GET /api/Assignments/v2/{id}` до терминального статуса
    (`Complete`/`Error`) либо таймаута.
 4. `QueueStepExecutor`: создаёт `ExchangeQueue` (`POST /api/ExchangeQueues`), добавляет
    транзакции-шаблоны (`PUT /api/ExchangeQueues/{id}/Items/Add`).
