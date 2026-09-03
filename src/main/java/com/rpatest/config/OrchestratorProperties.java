@@ -1,6 +1,7 @@
 package com.rpatest.config;
 
 import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "orchestrator")
@@ -10,6 +11,7 @@ public class OrchestratorProperties {
     private Credentials credentials = new Credentials();
     private Http http = new Http();
     private Polling polling = new Polling();
+    private Tls tls = new Tls();
 
     public String getBaseUrl() {
         return baseUrl;
@@ -41,6 +43,14 @@ public class OrchestratorProperties {
 
     public void setPolling(Polling polling) {
         this.polling = polling;
+    }
+
+    public Tls getTls() {
+        return tls;
+    }
+
+    public void setTls(Tls tls) {
+        this.tls = tls;
     }
 
     public static class Credentials {
@@ -103,6 +113,24 @@ public class OrchestratorProperties {
 
         public void setTimeout(Duration timeout) {
             this.timeout = timeout;
+        }
+    }
+
+    public static class Tls {
+        /**
+         * Пути к сертификатам корневого/промежуточного CA оркестратора (например,
+         * {@code file:C:/certs/CA.crt}, {@code file:C:/certs/CA_2.crt}) — нужны, когда
+         * оркестратор поднят с сертификатом, подписанным внутренним CA, недоверенным JDK
+         * по умолчанию. Пусто — используется системное доверенное хранилище JDK как есть.
+         */
+        private List<String> trustedCertificates = List.of();
+
+        public List<String> getTrustedCertificates() {
+            return trustedCertificates;
+        }
+
+        public void setTrustedCertificates(List<String> trustedCertificates) {
+            this.trustedCertificates = trustedCertificates;
         }
     }
 }

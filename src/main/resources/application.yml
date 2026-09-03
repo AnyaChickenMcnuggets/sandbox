@@ -32,6 +32,10 @@ orchestrator:
   polling:
     interval: 5s
     timeout: 30m
+  # orchestrator.tls.trusted-certificates: сертификаты CA оркестратора, если он поднят за
+  # внутренним/самоподписанным CA (иначе PKIX path building failed при HTTPS-подключении).
+  # Не задан по умолчанию (используется системный truststore JDK как есть). Задаётся через env:
+  # ORCHESTRATOR_TLS_TRUSTED_CERTIFICATES=file:C:/certs/CA.crt,file:C:/certs/CA_2.crt
 
 resilience4j:
   retry:

@@ -116,6 +116,7 @@ scenario_run 1───* step_run 1───* queue_item_result
 | `orchestrator.credentials.robot-edition` | значение `robotEdition` в `LoginDto` |
 | `orchestrator.polling.interval` / `orchestrator.polling.timeout` | параметры опроса статуса Assignment |
 | `orchestrator.http.connect-timeout` / `read-timeout` | таймауты HTTP-клиента |
+| `orchestrator.tls.trusted-certificates` | пути к сертификатам CA оркестратора (`file:...`), если он за внутренним CA — иначе PKIX path building failed |
 | `resilience4j.retry.instances.orchestrator.*` | политика retry |
 | `resilience4j.circuitbreaker.instances.orchestrator.*` | политика circuit breaker |
 
