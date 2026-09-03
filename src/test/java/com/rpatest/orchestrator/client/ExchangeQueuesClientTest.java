@@ -72,7 +72,7 @@ class ExchangeQueuesClientTest {
         wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/" + queueId + "/Items"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("{\"totalCount\":1,\"items\":[{\"id\":\"" + itemId
-                                + "\",\"value\":\"v\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"lastEventType\":0}]}")));
+                                + "\",\"value\":\"v\",\"createdAt\":\"2024-01-01T00:00:00.123456\",\"lastEventType\":0}]}")));
 
         PageDto<ExchangeQueueValueDto> page = client.listItems(queueId, 0, 100);
 
