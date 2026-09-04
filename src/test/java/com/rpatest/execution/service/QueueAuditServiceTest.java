@@ -15,7 +15,7 @@ import com.rpatest.execution.web.QueueItemResponse;
 import com.rpatest.orchestrator.client.ExchangeQueuesPort;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueEventType;
-import com.rpatest.orchestrator.dto.PageDto;
+import com.rpatest.orchestrator.dto.ListResultDto;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -61,7 +61,7 @@ class QueueAuditServiceTest {
         when(stepRunRepository.findByScenarioRunIdAndStepId(1L, 2L)).thenReturn(Optional.of(stepRun));
         ExchangeQueueValueDto item = new ExchangeQueueValueDto(
                 itemId, "value", "key-1", null, null, null, ExchangeQueueValueEventType.SUCCESS, "ok");
-        when(exchangeQueuesPort.listItems(queueId, 0, 100)).thenReturn(new PageDto<>(1, List.of(item)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 100)).thenReturn(ListResultDto.of(1, List.of(item)));
 
         List<QueueItemResponse> result = service.auditQueueItems(1L, 2L, 0, 100);
 
@@ -77,7 +77,7 @@ class QueueAuditServiceTest {
         StepRun stepRun = new StepRun(1L, 2L);
         stepRun.setOrchestratorQueueId(queueId);
         when(stepRunRepository.findByScenarioRunIdAndStepId(1L, 2L)).thenReturn(Optional.of(stepRun));
-        when(exchangeQueuesPort.listItems(queueId, 0, 100)).thenReturn(new PageDto<>(0, null));
+        when(exchangeQueuesPort.listItems(queueId, 0, 100)).thenReturn(ListResultDto.of(0, null));
 
         List<QueueItemResponse> result = service.auditQueueItems(1L, 2L, 0, 100);
 

@@ -106,6 +106,21 @@ Backend для автоматизации тестирования задани�
       падения на конфликте имени или ошибки "не найдена"
 - [x] 121 тест (было 108), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 11 — Починка чтения элементов очереди — DONE
+На реальном стенде `GET /api/ExchangeQueues/{id}/Items` (без версии) не падал с ошибкой, а тихо
+отдавал не тот формат ответа — из-за этого `QUEUE_CHECK` не видел элементов вообще и просто
+бесконечно поллил до таймаута, а прогон сценария завис в `RUNNING`. Подтверждено рабочим Python-
+клиентом `orc_worker.py`: реальный список элементов отдаёт только `v2`-эндпоинт, и в форме
+`{totalCount, filterCount, result}` (как `RpaProjectLaunches`), а не `{totalCount, items}`,
+которую мы ошибочно предполагали.
+- [x] `ExchangeQueuesClient.listItems`: `GET /api/ExchangeQueues/{id}/Items` → `GET
+      /api/ExchangeQueues/v2/{id}/Items`, тип ответа `PageDto` → `ListResultDto` (`.items()` →
+      `.result()`); `PageDto` удалён как класс, основанный на неверном предположении
+- [x] `QueueAuditService`, `QueueCheckStepExecutor` переведены на `.result()`
+- [x] Тест на регрессию: `listItemsDoesNotHitTheStaleV1Endpoint` — явно проверяет, что v1-путь не
+      вызывается вообще
+- [x] 122 теста, `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
@@ -135,6 +150,14 @@ Backend для автоматизации тестирования задани�
   одну и ту же строку `step_run` (HTTP-поток `/stop` и async-поток движка) не проверялась на
   реальном стенде — не проверено, действительно ли `PUT /Assignments/{id}/Stop` быстро приводит к
   `killedAt` в `RpaProjectLaunches`.
+- **Расхождение в эндпоинте добавления транзакции.** `QueueStepExecutor.enqueue` использует `PUT
+  /api/ExchangeQueues/v2/enqueue/{queueName}` (по имени очереди), а рабочий Python-клиент
+  `orc_worker.py` (`add_transaction`) — `PUT /api/ExchangeQueues/{id}/Items/Add` (по id очереди,
+  без версии). Пользователь пока не сообщал о проблемах с этим эндпоинтом (задание `job1` доходит
+  до `SUCCEEDED`), но после починки чтения (Sprint 11) стоит явно перепроверить на реальном
+  стенде, что отправленные нами транзакции корректно видны через `checkInput`/аудит — если оно уже
+  тихо не работает (как было с чтением), тот же паттерн диагностики (сверка с `orc_worker.py`)
+  применим и здесь.
 - `ScenarioStepRepositoryIT` (Testcontainers) не запускался в этой сессии — в текущем окружении
   нет Docker. Прогнать в CI/локально с Docker перед мёржем.
 - ~~В `TESTING.md` очередь-приёмник результата (`queueOut`) была потомком `job1`, хотя её текст

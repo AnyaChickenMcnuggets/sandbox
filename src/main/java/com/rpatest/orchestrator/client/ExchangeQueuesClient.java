@@ -4,7 +4,7 @@ import com.rpatest.orchestrator.dto.EnqueueExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueCreateDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
-import com.rpatest.orchestrator.dto.PageDto;
+import com.rpatest.orchestrator.dto.ListResultDto;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import java.util.List;
@@ -65,14 +65,18 @@ public class ExchangeQueuesClient implements ExchangeQueuesPort {
     @Override
     @Retry(name = "orchestrator-read")
     @CircuitBreaker(name = "orchestrator")
-    public PageDto<ExchangeQueueValueDto> listItems(UUID queueId, int pageNumber, int pageSize) {
+    public ListResultDto<ExchangeQueueValueDto> listItems(UUID queueId, int pageNumber, int pageSize) {
+        // /api/ExchangeQueues/{id}/Items (без версии) не актуален на реальном стенде — подтверждено
+        // рабочим Python-клиентом (orc_worker.py), который читает список элементов только через v2
+        // и распаковывает ответ по ключу "result" (форма ListResult, как у RpaProjectLaunches), а
+        // не "items" (PageDto), которую ошибочно предполагали раньше.
         return OrchestratorClientSupport.execute("list items of queue " + queueId, () -> restClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/api/ExchangeQueues/{id}/Items")
+                .uri(uriBuilder -> uriBuilder.path("/api/ExchangeQueues/v2/{id}/Items")
                         .queryParam("pageNumber", pageNumber)
                         .queryParam("pageSize", pageSize)
                         .build(queueId))
                 .retrieve()
-                .body(new ParameterizedTypeReference<PageDto<ExchangeQueueValueDto>>() {
+                .body(new ParameterizedTypeReference<ListResultDto<ExchangeQueueValueDto>>() {
                 }));
     }
 

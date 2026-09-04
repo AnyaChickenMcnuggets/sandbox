@@ -16,7 +16,7 @@ import com.rpatest.orchestrator.dto.EnqueueExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueCreateDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
-import com.rpatest.orchestrator.dto.PageDto;
+import com.rpatest.orchestrator.dto.ListResultDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import java.util.List;
 import java.util.Optional;
@@ -109,18 +109,40 @@ class ExchangeQueuesClientTest {
     }
 
     @Test
-    void listItemsReturnsPagedResult() {
+    void listItemsReturnsResultFromV2Endpoint() {
+        // /api/ExchangeQueues/{id}/Items (без версии) не актуален на реальном стенде — только v2,
+        // и ответ распаковывается по ключу "result" (ListResult), не "items" (PageDto). См.
+        // orc_worker.py (рабочий Python-клиент): get_trans_by_filter/get_trans_by_id используют
+        // именно v2 и читают response.json()["result"].
         UUID queueId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
-        wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/" + queueId + "/Items"))
+        wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/v2/" + queueId + "/Items"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
-                        .withBody("{\"totalCount\":1,\"items\":[{\"id\":\"" + itemId
+                        .withBody("{\"totalCount\":1,\"filterCount\":1,\"result\":[{\"id\":\"" + itemId
                                 + "\",\"value\":\"v\",\"createdAt\":\"2024-01-01T00:00:00.123456\",\"lastEventType\":0}]}")));
 
-        PageDto<ExchangeQueueValueDto> page = client.listItems(queueId, 0, 100);
+        ListResultDto<ExchangeQueueValueDto> page = client.listItems(queueId, 0, 100);
 
         assertThat(page.totalCount()).isEqualTo(1);
-        assertThat(page.items()).hasSize(1);
-        assertThat(page.items().get(0).id()).isEqualTo(itemId);
+        assertThat(page.result()).hasSize(1);
+        assertThat(page.result().get(0).id()).isEqualTo(itemId);
+    }
+
+    @Test
+    void listItemsDoesNotHitTheStaleV1Endpoint() {
+        UUID queueId = UUID.randomUUID();
+        wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/" + queueId + "/Items"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"totalCount\":99,\"items\":[]}")));
+        wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/v2/" + queueId + "/Items"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"totalCount\":0,\"filterCount\":0,\"result\":[]}")));
+
+        client.listItems(queueId, 0, 100);
+
+        wireMockServer.verify(0, com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor(
+                urlPathEqualTo("/api/ExchangeQueues/" + queueId + "/Items")));
+        wireMockServer.verify(1, com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor(
+                urlPathEqualTo("/api/ExchangeQueues/v2/" + queueId + "/Items")));
     }
 }

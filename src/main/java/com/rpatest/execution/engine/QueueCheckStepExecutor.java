@@ -119,7 +119,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
     private List<ExchangeQueueValueDto> fetchMatchingItems(UUID queueId, Set<String> naturalKeyFilter, boolean prefixMatch) {
         List<ExchangeQueueValueDto> all = new ArrayList<>();
         for (int page = 0; page < MAX_PAGES; page++) {
-            List<ExchangeQueueValueDto> items = exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE).items();
+            List<ExchangeQueueValueDto> items = exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE).result();
             if (items == null || items.isEmpty()) {
                 break;
             }

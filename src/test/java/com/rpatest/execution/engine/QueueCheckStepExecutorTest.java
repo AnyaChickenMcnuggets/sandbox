@@ -15,7 +15,7 @@ import com.rpatest.orchestrator.client.ExchangeQueuesPort;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueEventType;
-import com.rpatest.orchestrator.dto.PageDto;
+import com.rpatest.orchestrator.dto.ListResultDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
@@ -51,7 +51,7 @@ class QueueCheckStepExecutorTest {
     void succeedsWhenExpectedStatusCountsMatch() {
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(2, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
                 item("k1", ExchangeQueueValueEventType.SUCCESS),
                 item("k2", ExchangeQueueValueEventType.ERROR))));
 
@@ -69,7 +69,7 @@ class QueueCheckStepExecutorTest {
     void filtersByNaturalKeysWhenProvided() {
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(2, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
                 item("tracked", ExchangeQueueValueEventType.SUCCESS),
                 item("ignored", ExchangeQueueValueEventType.ERROR))));
 
@@ -88,7 +88,7 @@ class QueueCheckStepExecutorTest {
         // базовым ключом и дописанным суффиксом для трассировки: "tx-1-a", "tx-1-b"
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(3, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
                 item("tx-1-a", ExchangeQueueValueEventType.SUCCESS),
                 item("tx-1-b", ExchangeQueueValueEventType.SUCCESS),
                 item("tx-2-a", ExchangeQueueValueEventType.SUCCESS))));
@@ -108,7 +108,7 @@ class QueueCheckStepExecutorTest {
         // без naturalKeyPrefixMatch=true "tx-1" не должен матчить "tx-1-a" — точное совпадение
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(1, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
                 item("tx-1-a", ExchangeQueueValueEventType.SUCCESS))));
 
         ScenarioStep step = step(Map.of(
@@ -124,7 +124,7 @@ class QueueCheckStepExecutorTest {
     void succeedsWhenMinTotalCountSatisfied() {
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(3, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
                 item("k1", null), item("k2", null), item("k3", null))));
 
         ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 3));
@@ -137,7 +137,7 @@ class QueueCheckStepExecutorTest {
     void throwsOnTimeoutWhenExpectationsNeverMet() {
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(1, List.of(item("k1", null))));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", null))));
 
         ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("SUCCESS", 5)));
         StepRun stepRun = new StepRun(1L, 2L);
@@ -156,7 +156,7 @@ class QueueCheckStepExecutorTest {
         when(exchangeQueuesPort.findByName("missing"))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "missing", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(0, List.of()));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(0, List.of()));
 
         ScenarioStep step = step(Map.of("queueName", "missing", "minTotalCount", 0));
         StepRun stepRun = new StepRun(1L, 2L);
@@ -181,7 +181,7 @@ class QueueCheckStepExecutorTest {
     void doesNotRecreateQueueThatAlreadyExists() {
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(0, List.of()));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(0, List.of()));
 
         ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 0));
         StepRun stepRun = new StepRun(1L, 2L);

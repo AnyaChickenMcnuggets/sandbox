@@ -91,10 +91,13 @@ scenario_run 1───* step_run 1───* queue_item_result
    входной очереди (данные для задания), и к выходной (создаётся заранее, до старта задания, чтобы
    заданию было куда писать) — повторный прогон сценария без `cleanup` не падает на конфликте
    имени, а просто переиспользует существующую очередь. `QueueStepExecutor` после этого добавляет
-   транзакции-шаблоны (`PUT /api/ExchangeQueues/{id}/Items/Add`, точнее `v2/enqueue/{queueName}`).
+   транзакции-шаблоны (`PUT /api/ExchangeQueues/v2/enqueue/{queueName}` — рабочий Python-клиент
+   `orc_worker.py` для этого использует другой эндпоинт, `PUT /api/ExchangeQueues/{id}/Items/Add`;
+   расхождение зафиксировано как риск в `roadmap.md`, пока не подтверждено на реальном стенде).
 4a. `QueueCheckStepExecutor` (тип шага `QUEUE_CHECK`) — **не про то, запустилось ли задание**
    (это уже гарантирует `JobStepExecutor`/`StatusPoller`, см. п. 3), а про бизнес-результат:
-   поллит очередь (`GET /api/ExchangeQueues/{id}/Items`, постранично) до тех пор, пока фактические
+   поллит очередь (`GET /api/ExchangeQueues/v2/{id}/Items`, постранично — **не** без версии, тот
+   эндпоинт неактуален и молча возвращает не тот формат ответа, см. ниже) до тех пор, пока фактические
    количества элементов по производному статусу (`QueueItemDerivedStatus`, опционально
    отфильтрованные по списку `naturalKey`) не совпадут с ожидаемыми из `config.expectedStatusCounts`
    / `config.minTotalCount`, либо не истечёт `orchestrator.queue-check-polling.timeout`. Фильтр по

@@ -39,7 +39,7 @@ public class QueueAuditService {
         }
 
         List<ExchangeQueueValueDto> items =
-                exchangeQueuesPort.listItems(stepRun.getOrchestratorQueueId(), pageNumber, pageSize).items();
+                exchangeQueuesPort.listItems(stepRun.getOrchestratorQueueId(), pageNumber, pageSize).result();
         if (items == null) {
             items = List.of();
         }
