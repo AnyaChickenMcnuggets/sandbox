@@ -104,7 +104,7 @@ public class ScenarioExecutionEngine {
             stepRun.markSucceeded();
         } catch (Exception e) {
             log.warn("Шаг '{}' (id={}) прогона {} завершился с ошибкой", step.getName(), step.getId(), run.getId(), e);
-            stepRun.markFailed(e.getMessage());
+            stepRun.markFailed(describeWithCauses(e));
         } finally {
             stepRunRepository.save(stepRun);
         }
@@ -122,5 +122,23 @@ public class ScenarioExecutionEngine {
                         () -> executeStepRecursively(run, stepsById.get(id), stepsById, outgoing), executor))
                 .toArray(CompletableFuture[]::new);
         CompletableFuture.allOf(childFutures).join();
+    }
+
+    /**
+     * {@code stepRun.errorMessage} — единственное, что видит вызывающий API/UI при падении шага;
+     * одного {@code e.getMessage()} часто недостаточно (например, "Не удалось выполнить проверку
+     * очереди '...'" ничего не говорит о том, какой именно HTTP-вызов упал и с каким статусом) —
+     * дописываем сообщения из цепочки причин.
+     */
+    private String describeWithCauses(Throwable e) {
+        StringBuilder sb = new StringBuilder(String.valueOf(e.getMessage()));
+        Throwable cause = e.getCause();
+        int depth = 0;
+        while (cause != null && cause != e && depth < 5) {
+            sb.append(" — ").append(cause.getMessage());
+            cause = cause.getCause();
+            depth++;
+        }
+        return sb.toString();
     }
 }

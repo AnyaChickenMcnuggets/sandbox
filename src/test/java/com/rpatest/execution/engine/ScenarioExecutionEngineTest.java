@@ -112,6 +112,36 @@ class ScenarioExecutionEngineTest {
         assertThat(run.getStatus()).isEqualTo(RunStatus.FAILED);
     }
 
+    @Test
+    void errorMessageIncludesRootCauseNotJustWrapperText() {
+        ScenarioStep job = step(1L, ScenarioStepType.JOB, "job");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(job));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of());
+
+        RuntimeException rootCause = new RuntimeException("500 [no body]");
+        StepExecutor executorThatWrapsACause = new StepExecutor() {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.JOB;
+            }
+
+            @Override
+            public void execute(StepRun stepRun, ScenarioStep step) {
+                throw new StepExecutionException("Не удалось выполнить проверку очереди 'x'", rootCause);
+            }
+        };
+
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(executorThatWrapsACause), Runnable::run);
+
+        engine.runScenario(10L);
+
+        String errorMessage = savedStepRunsById.values().iterator().next().getErrorMessage();
+        assertThat(errorMessage).contains("Не удалось выполнить проверку очереди 'x'");
+        assertThat(errorMessage).contains("500 [no body]");
+    }
+
     private StepExecutor alsoSupports(StepExecutor delegate, ScenarioStepType type) {
         return new StepExecutor() {
             @Override
