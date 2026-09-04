@@ -149,6 +149,31 @@ Backend для автоматизации тестирования задани�
       шага, следующие шаги DAG)
 - [x] 129 тестов (было 128, +`StepProgressReporterTest`), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 14 — Фикс дедлока движка на длинных цепочках DAG — DONE
+Пользователь после Sprint 13: логи обрывались сразу после "шаг 'Job' запускает следующие шаги:
+[Check Input Queue Result]" и дальше ничего не происходило, `QUEUE_CHECK`-шаги не появлялись в
+`GET /api/v1/runs/{runId}` вообще, статус навсегда оставался `RUNNING`. Причина — не пропавшая
+фича, а дедлок движка: `executeStepRecursively` рекурсивно вызывал
+`CompletableFuture.runAsync(...).join()`, и каждый уровень цепочки навсегда занимал отдельный поток
+пула `scenarioExecutionExecutor` (`corePoolSize=4`) в ожидании следующего. `ThreadPoolExecutor`
+создаёт потоки сверх `corePoolSize` только когда очередь заполнена (`queueCapacity=100` — почти
+никогда), а не когда все core-потоки заняты/заблокированы — поэтому на цепочке
+`queueIn→queueOut→job→checkInput→checkOutput` (5 уровней + сам `runScenario` на потоке
+`ExecutionService`) 4-й уровень (`job`, последний core-поток) успешно доходил до конца и пытался
+запустить `checkInput`, но все core-потоки к этому моменту уже были заблокированы в `.join()` друг
+на друге — задача просто вставала в очередь без исполнителя. Оттуда и молчание в логах, и
+отсутствие `StepRun` для `checkInput`/`checkOutput` (он создаётся в начале
+`executeStepRecursively`, которая для них так и не запустилась).
+- [x] `ScenarioExecutionEngine.executeStepRecursively` заменён на `executeStepAsync` +
+      `runStep`: вместо рекурсивного блокирующего `runAsync(...).join()` — цепочка
+      `supplyAsync(...).thenComposeAsync(...)`, которая не занимает поток пула на ожидание детей
+      (продолжение планируется на пуле по готовности родителя, а не блокирует чей-то поток)
+- [x] Регрессионный тест `doesNotDeadlockOnLinearChainLongerThanExecutorThreadCount` —
+      реальный `Executors.newFixedThreadPool(2)` + линейная цепочка из 6 шагов,
+      `assertTimeoutPreemptively(10s)`: на старом коде гарантированно виснет уже на 3-м уровне, на
+      новом укладывается в единицы миллисекунд
+- [x] 130 тестов (было 129), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

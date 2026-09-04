@@ -15,12 +15,17 @@ import com.rpatest.scenario.domain.ScenarioStepEdge;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import com.rpatest.scenario.repository.ScenarioStepEdgeRepository;
 import com.rpatest.scenario.repository.ScenarioStepRepository;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -140,6 +145,40 @@ class ScenarioExecutionEngineTest {
         String errorMessage = savedStepRunsById.values().iterator().next().getErrorMessage();
         assertThat(errorMessage).contains("Не удалось выполнить проверку очереди 'x'");
         assertThat(errorMessage).contains("500 [no body]");
+    }
+
+    @Test
+    void doesNotDeadlockOnLinearChainLongerThanExecutorThreadCount() {
+        // Регрессия: до фикса runScenario->executeStepRecursively рекурсивно звал
+        // CompletableFuture.runAsync(...).join() на каждом уровне цепочки — каждый уровень навсегда
+        // занимал отдельный поток пула, ожидая следующий. На пуле с 2 потоками и цепочкой из 6
+        // последовательных шагов (queueIn->queueOut->job->checkInput->checkOutput и т.п.) 3-й
+        // уровень уже не находил свободный поток и вис вечно, хотя очередь задач не была заполнена
+        // (ThreadPoolExecutor не создаёт новые потоки сверх занятых core, пока очередь не полна).
+        List<ScenarioStep> chain = List.of(
+                step(1L, ScenarioStepType.QUEUE, "s1"), step(2L, ScenarioStepType.QUEUE, "s2"),
+                step(3L, ScenarioStepType.JOB, "s3"), step(4L, ScenarioStepType.QUEUE, "s4"),
+                step(5L, ScenarioStepType.QUEUE, "s5"), step(6L, ScenarioStepType.QUEUE, "s6"));
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(chain);
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of(
+                new ScenarioStepEdge(1L, 2L), new ScenarioStepEdge(2L, 3L), new ScenarioStepEdge(3L, 4L),
+                new ScenarioStepEdge(4L, 5L), new ScenarioStepEdge(5L, 6L)));
+
+        StepExecutor succeedingExecutor = new RecordingExecutor(null);
+        ExecutorService boundedPool = Executors.newFixedThreadPool(2);
+        try {
+            ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                    stepRepository, edgeRepository, runRepository, stepRunRepository,
+                    List.of(succeedingExecutor, alsoSupports(succeedingExecutor, ScenarioStepType.QUEUE)),
+                    boundedPool);
+
+            assertTimeoutPreemptively(Duration.ofSeconds(10), () -> engine.runScenario(10L));
+        } finally {
+            boundedPool.shutdownNow();
+        }
+
+        assertThat(savedStepRunsById).hasSize(6);
+        assertThat(run.getStatus()).isEqualTo(RunStatus.SUCCEEDED);
     }
 
     private StepExecutor alsoSupports(StepExecutor delegate, ScenarioStepType type) {

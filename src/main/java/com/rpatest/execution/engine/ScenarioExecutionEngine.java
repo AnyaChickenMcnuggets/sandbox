@@ -79,8 +79,7 @@ public class ScenarioExecutionEngine {
                     roots.stream().map(ScenarioStep::getName).toList());
 
             CompletableFuture<?>[] rootFutures = roots.stream()
-                    .map(root -> CompletableFuture.runAsync(
-                            () -> executeStepRecursively(run, root, stepsById, outgoing), executor))
+                    .map(root -> executeStepAsync(run, root, stepsById, outgoing))
                     .toArray(CompletableFuture[]::new);
             CompletableFuture.allOf(rootFutures).join();
 
@@ -96,8 +95,36 @@ public class ScenarioExecutionEngine {
         }
     }
 
-    private void executeStepRecursively(
+    /**
+     * Не блокирует поток на {@code .join()} в ожидании дочерних шагов — при recursion через
+     * {@code runAsync(...).join()} каждый уровень цепочки навсегда занимал отдельный поток пула,
+     * и на цепочке длиннее {@code corePoolSize} (см. {@code AsyncConfig}) все core-потоки
+     * оказывались заблокированы в ожидании друг друга раньше, чем пул успевал вырасти до
+     * {@code maxPoolSize} — {@code ThreadPoolExecutor} создаёт потоки сверх core только когда
+     * очередь заполнена, а не когда все core-потоки заняты/блокированы. {@code thenComposeAsync}
+     * планирует продолжение на пуле по готовности, не занимая поток ожиданием.
+     */
+    private CompletableFuture<Void> executeStepAsync(
             ScenarioRun run, ScenarioStep step, Map<Long, ScenarioStep> stepsById, Map<Long, List<Long>> outgoing) {
+        return CompletableFuture.supplyAsync(() -> runStep(run, step), executor)
+                .thenComposeAsync(status -> {
+                    if (status != RunStatus.SUCCEEDED) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    List<Long> nextStepIds = outgoing.getOrDefault(step.getId(), List.of());
+                    if (nextStepIds.isEmpty()) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    log.info("Прогон {}: шаг '{}' запускает следующие шаги: {}", run.getId(), step.getName(),
+                            nextStepIds.stream().map(id -> stepsById.get(id).getName()).toList());
+                    CompletableFuture<?>[] childFutures = nextStepIds.stream()
+                            .map(id -> executeStepAsync(run, stepsById.get(id), stepsById, outgoing))
+                            .toArray(CompletableFuture[]::new);
+                    return CompletableFuture.allOf(childFutures);
+                }, executor);
+    }
+
+    private RunStatus runStep(ScenarioRun run, ScenarioStep step) {
         StepRun stepRun = new StepRun(run.getId(), step.getId());
         stepRun.markRunning();
         stepRun = stepRunRepository.save(stepRun);
@@ -114,22 +141,7 @@ public class ScenarioExecutionEngine {
         } finally {
             stepRunRepository.save(stepRun);
         }
-
-        if (stepRun.getStatus() != RunStatus.SUCCEEDED) {
-            return;
-        }
-
-        List<Long> nextStepIds = outgoing.getOrDefault(step.getId(), List.of());
-        if (nextStepIds.isEmpty()) {
-            return;
-        }
-        log.info("Прогон {}: шаг '{}' запускает следующие шаги: {}", run.getId(), step.getName(),
-                nextStepIds.stream().map(id -> stepsById.get(id).getName()).toList());
-        CompletableFuture<?>[] childFutures = nextStepIds.stream()
-                .map(id -> CompletableFuture.runAsync(
-                        () -> executeStepRecursively(run, stepsById.get(id), stepsById, outgoing), executor))
-                .toArray(CompletableFuture[]::new);
-        CompletableFuture.allOf(childFutures).join();
+        return stepRun.getStatus();
     }
 
     /**
