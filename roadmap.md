@@ -121,6 +121,17 @@ Backend для автоматизации тестирования задани�
       вызывается вообще
 - [x] 122 теста, `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 12 — Указание проекта по имени — DONE
+Пользователь: не хочет искать `rpaProjectId` вручную — указывает название проекта, бэкенд сам
+ищет id по списку проектов.
+- [x] `RpaProjectShortDto`, `RpaProjectsPort` + `RpaProjectsClient` (`GET
+      /api/RpaProjects/v3/short` — тот же эндпоинт, что и в `OrcService.java`), `findByName` с
+      точным совпадением, предпочитает `active=true` при дублях (разные версии одного имени)
+- [x] `JobStepConfig.rpaProjectName` (опционально, наряду с `rpaProjectId` — ровно одно из двух);
+      `JobStepExecutor` резолвит id до создания Assignment, явная ошибка если имя не найдено или
+      не задано ни имя, ни id
+- [x] 128 тестов, `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

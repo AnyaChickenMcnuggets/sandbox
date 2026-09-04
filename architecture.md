@@ -7,7 +7,7 @@
 
 | Термин в требованиях | Сущность Primo RPA Orchestrator API | Наш домен |
 |---|---|---|
-| Проект | `RpaProjects` | ссылка по `rpaProjectId` |
+| Проект | `RpaProjects` (список — `GET /api/RpaProjects/v3/short`) | `RpaProjectsPort.findByName` → `JobStepConfig.rpaProjectName` (или напрямую `rpaProjectId`) |
 | Job / Задание | `Assignments` | `ScenarioStep(type=JOB)` → `StepRun.orchestratorAssignmentId` |
 | Аргументы задания | `RpaProjectVariables` (`/Assignment/{id}`) | `JobStepConfig.arguments` |
 | Очередь транзакций | `ExchangeQueues` | `ScenarioStep(type=QUEUE)` → `StepRun.orchestratorQueueId` |
@@ -67,7 +67,12 @@ scenario_run 1───* step_run 1───* queue_item_result
    запускает `ScenarioExecutionEngine.execute(run)`.
 2. Движок находит корневые шаги DAG (без входящих рёбер) и исполняет их через `StepExecutor`
    (Strategy: `JobStepExecutor` / `QueueStepExecutor` / `QueueCheckStepExecutor`).
-3. `JobStepExecutor`: создаёт `Assignment` (`POST /api/Assignments/v2` — эндпоинт v1 без версии в
+3. `JobStepExecutor`: сначала определяет `rpaProjectId` — если в `config` задано
+   `rpaProjectName`, ищет его через `RpaProjectsPort.findByName` (`GET /api/RpaProjects/v3/short`,
+   по точному совпадению имени; при нескольких версиях с одинаковым именем предпочитает
+   `active=true`); если имя не найдено — шаг сразу падает с понятным сообщением, не доходя до
+   создания Assignment. Если `rpaProjectName` не задано — используется `rpaProjectId` напрямую.
+   Затем создаёт `Assignment` (`POST /api/Assignments/v2` — эндпоинт v1 без версии в
    swagger присутствует, но не актуален на реальном стенде), выставляет аргументы
    (`PUT /api/RpaProjectVariables/Assignment/{id}`), стартует (`PUT /api/Assignments/{id}/Start`),
    передаёт управление `StatusPoller`.

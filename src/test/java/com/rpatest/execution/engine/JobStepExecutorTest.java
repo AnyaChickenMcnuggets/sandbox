@@ -14,11 +14,13 @@ import com.rpatest.execution.domain.StepRun;
 import com.rpatest.orchestrator.client.AssignmentsPort;
 import com.rpatest.orchestrator.client.RpaProjectQueuePort;
 import com.rpatest.orchestrator.client.RpaProjectVariablesPort;
+import com.rpatest.orchestrator.client.RpaProjectsPort;
 import com.rpatest.orchestrator.dto.AssignmentCreateDto;
 import com.rpatest.orchestrator.dto.AssignmentDto;
 import com.rpatest.orchestrator.dto.AssignmentStatus;
 import com.rpatest.orchestrator.dto.QueueItemProjectDto;
 import com.rpatest.orchestrator.dto.RpaProjectLaunchDto;
+import com.rpatest.orchestrator.dto.RpaProjectShortDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableEditByIdDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
@@ -28,12 +30,14 @@ import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class JobStepExecutorTest {
 
     private AssignmentsPort assignmentsPort;
+    private RpaProjectsPort rpaProjectsPort;
     private RpaProjectVariablesPort rpaProjectVariablesPort;
     private RpaProjectQueuePort rpaProjectQueuePort;
     private StatusPoller statusPoller;
@@ -42,11 +46,12 @@ class JobStepExecutorTest {
     @BeforeEach
     void setUp() {
         assignmentsPort = mock(AssignmentsPort.class);
+        rpaProjectsPort = mock(RpaProjectsPort.class);
         rpaProjectVariablesPort = mock(RpaProjectVariablesPort.class);
         rpaProjectQueuePort = mock(RpaProjectQueuePort.class);
         statusPoller = mock(StatusPoller.class);
-        executor = new JobStepExecutor(
-                assignmentsPort, rpaProjectVariablesPort, rpaProjectQueuePort, statusPoller, new ObjectMapper());
+        executor = new JobStepExecutor(assignmentsPort, rpaProjectsPort, rpaProjectVariablesPort,
+                rpaProjectQueuePort, statusPoller, new ObjectMapper());
     }
 
     @Test
@@ -67,6 +72,42 @@ class JobStepExecutorTest {
         assertThat(stepRun.getOrchestratorAssignmentId()).isEqualTo(42);
         verify(assignmentsPort).start(42);
         verify(rpaProjectVariablesPort, never()).get(anyInt());
+    }
+
+    @Test
+    void resolvesProjectIdByNameWhenProjectNameProvided() {
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectName", "Invoice Processor"));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(rpaProjectsPort.findByName("Invoice Processor"))
+                .thenReturn(Optional.of(new RpaProjectShortDto(7, "Invoice Processor", null, null, true)));
+        AssignmentDto created = new AssignmentDto(42, "job", "My Job", 7, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(successfulLaunch(42));
+
+        executor.execute(stepRun, step);
+
+        org.mockito.ArgumentCaptor<AssignmentCreateDto> captor = org.mockito.ArgumentCaptor.forClass(AssignmentCreateDto.class);
+        verify(assignmentsPort).create(captor.capture());
+        assertThat(captor.getValue().rpaProjectId()).isEqualTo(7);
+    }
+
+    @Test
+    void throwsWhenProjectNameNotFound() {
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectName", "Unknown Project"));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(rpaProjectsPort.findByName("Unknown Project")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("Unknown Project");
+    }
+
+    @Test
+    void throwsWhenNeitherProjectNameNorIdProvided() {
+        ScenarioStep step = step(5L, "My Job", Map.of());
+        StepRun stepRun = new StepRun(10L, 5L);
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
     }
 
     @Test
