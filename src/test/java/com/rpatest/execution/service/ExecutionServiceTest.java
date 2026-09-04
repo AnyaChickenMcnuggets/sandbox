@@ -18,6 +18,7 @@ import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.execution.web.RunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
+import com.rpatest.scenario.repository.ScenarioStepRepository;
 import com.rpatest.scenario.repository.TestScenarioRepository;
 import java.lang.reflect.Field;
 import java.util.List;
@@ -31,6 +32,7 @@ class ExecutionServiceTest {
     private TestScenarioRepository scenarioRepository;
     private ScenarioRunRepository runRepository;
     private StepRunRepository stepRunRepository;
+    private ScenarioStepRepository scenarioStepRepository;
     private ScenarioExecutionEngine engine;
     private AssignmentsPort assignmentsPort;
     private ExecutionService service;
@@ -40,10 +42,12 @@ class ExecutionServiceTest {
         scenarioRepository = mock(TestScenarioRepository.class);
         runRepository = mock(ScenarioRunRepository.class);
         stepRunRepository = mock(StepRunRepository.class);
+        scenarioStepRepository = mock(ScenarioStepRepository.class);
         engine = mock(ScenarioExecutionEngine.class);
         assignmentsPort = mock(AssignmentsPort.class);
         Executor synchronousExecutor = Runnable::run;
-        service = new ExecutionService(scenarioRepository, runRepository, stepRunRepository, engine, assignmentsPort, synchronousExecutor);
+        service = new ExecutionService(scenarioRepository, runRepository, stepRunRepository, scenarioStepRepository,
+                engine, assignmentsPort, synchronousExecutor);
     }
 
     @Test

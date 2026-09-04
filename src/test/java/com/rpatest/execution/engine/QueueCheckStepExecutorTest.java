@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.StepRun;
+import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.orchestrator.client.ExchangeQueuesPort;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
@@ -38,8 +39,9 @@ class QueueCheckStepExecutorTest {
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.getQueueCheckPolling().setInterval(Duration.ofMillis(10));
         properties.getQueueCheckPolling().setTimeout(Duration.ofMillis(150));
-        executor = new QueueCheckStepExecutor(
-                exchangeQueuesPort, new ExchangeQueueProvisioner(exchangeQueuesPort), properties, new ObjectMapper());
+        StepProgressReporter progressReporter = new StepProgressReporter(mock(StepRunRepository.class));
+        executor = new QueueCheckStepExecutor(exchangeQueuesPort, new ExchangeQueueProvisioner(exchangeQueuesPort),
+                progressReporter, properties, new ObjectMapper());
     }
 
     @Test

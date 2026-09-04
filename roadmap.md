@@ -132,6 +132,23 @@ Backend для автоматизации тестирования задани�
       не задано ни имя, ни id
 - [x] 128 тестов, `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 13 — Наблюдаемость выполнения (live-прогресс + логи) — DONE
+Пользователь после реального прогона: задание отработало на роботе и в оркестраторе всё видно, но
+статус рана всё ещё `RUNNING` без деталей, самих `QUEUE_CHECK`-шагов не видно вообще, а по логам
+сервера не восстановить, что происходит — "лучше будет много логов, чем 0".
+- [x] Flyway `V5__step_run_detail.sql`: `step_run.detail` (TEXT) + `detail_updated_at`
+      (TIMESTAMPTZ)
+- [x] `StepProgressReporter` — единая точка для одновременного обновления `StepRun.detail` в БД и
+      INFO-лога той же строки; подключён в `JobStepExecutor`, `QueueStepExecutor`,
+      `QueueCheckStepExecutor`, `StatusPoller` на каждый значимый переход/итерацию поллинга
+- [x] `StepRunResponse` расширен: `stepName`, `stepType`, `detail`, `detailUpdatedAt` —
+      `ExecutionService.toResponse` присоединяет `StepRun` к `ScenarioStep` через
+      `ScenarioStepRepository.findAllById`
+- [x] `logging.level.com.rpatest: INFO` в `application.yml` + `log.info`/`log.warn`/`log.error` по
+      всему `ScenarioExecutionEngine` и исполнителям шагов (старт/финиш рана, начало/итог каждого
+      шага, следующие шаги DAG)
+- [x] 129 тестов (было 128, +`StepProgressReporterTest`), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

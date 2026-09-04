@@ -57,6 +57,7 @@ public class ScenarioExecutionEngine {
                 .orElseThrow(() -> new StepExecutionException("ScenarioRun не найден: " + runId));
         run.markRunning();
         runRepository.save(run);
+        log.info("Прогон {} (сценарий {}) запущен", runId, run.getScenarioId());
 
         try {
             List<ScenarioStep> steps = stepRepository.findByScenarioIdOrderByPosition(run.getScenarioId());
@@ -74,6 +75,8 @@ public class ScenarioExecutionEngine {
             }
 
             List<ScenarioStep> roots = steps.stream().filter(s -> !hasIncoming.contains(s.getId())).toList();
+            log.info("Прогон {}: {} шаг(ов) всего, {} корневых: {}", runId, steps.size(), roots.size(),
+                    roots.stream().map(ScenarioStep::getName).toList());
 
             CompletableFuture<?>[] rootFutures = roots.stream()
                     .map(root -> CompletableFuture.runAsync(
@@ -84,6 +87,7 @@ public class ScenarioExecutionEngine {
             boolean anyFailed = stepRunRepository.findByScenarioRunId(runId).stream()
                     .anyMatch(sr -> sr.getStatus() == RunStatus.FAILED);
             run.finish(anyFailed ? RunStatus.FAILED : RunStatus.SUCCEEDED);
+            log.info("Прогон {} завершён со статусом {}", runId, run.getStatus());
         } catch (Exception e) {
             log.error("Прогон сценария {} завершился с ошибкой движка", runId, e);
             run.finish(RunStatus.FAILED);
@@ -97,11 +101,13 @@ public class ScenarioExecutionEngine {
         StepRun stepRun = new StepRun(run.getId(), step.getId());
         stepRun.markRunning();
         stepRun = stepRunRepository.save(stepRun);
+        log.info("Прогон {}: шаг '{}' (id={}, тип={}) начат", run.getId(), step.getName(), step.getId(), step.getType());
 
         StepExecutor stepExecutor = executorsByType.get(step.getType());
         try {
             stepExecutor.execute(stepRun, step);
             stepRun.markSucceeded();
+            log.info("Прогон {}: шаг '{}' (id={}) завершён успешно", run.getId(), step.getName(), step.getId());
         } catch (Exception e) {
             log.warn("Шаг '{}' (id={}) прогона {} завершился с ошибкой", step.getName(), step.getId(), run.getId(), e);
             stepRun.markFailed(describeWithCauses(e));
@@ -117,6 +123,8 @@ public class ScenarioExecutionEngine {
         if (nextStepIds.isEmpty()) {
             return;
         }
+        log.info("Прогон {}: шаг '{}' запускает следующие шаги: {}", run.getId(), step.getName(),
+                nextStepIds.stream().map(id -> stepsById.get(id).getName()).toList());
         CompletableFuture<?>[] childFutures = nextStepIds.stream()
                 .map(id -> CompletableFuture.runAsync(
                         () -> executeStepRecursively(run, stepsById.get(id), stepsById, outgoing), executor))

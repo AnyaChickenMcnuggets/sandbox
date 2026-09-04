@@ -6,6 +6,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.rpatest.config.OrchestratorProperties;
+import com.rpatest.execution.domain.StepRun;
+import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.orchestrator.client.RpaProjectLaunchesPort;
 import com.rpatest.orchestrator.client.RpaProjectQueuePort;
 import com.rpatest.orchestrator.dto.QueueItemProjectDto;
@@ -21,15 +23,18 @@ class StatusPollerTest {
     private RpaProjectLaunchesPort rpaProjectLaunchesPort;
     private RpaProjectQueuePort rpaProjectQueuePort;
     private StatusPoller poller;
+    private StepRun stepRun;
 
     @BeforeEach
     void setUp() {
         rpaProjectLaunchesPort = mock(RpaProjectLaunchesPort.class);
         rpaProjectQueuePort = mock(RpaProjectQueuePort.class);
+        StepProgressReporter progressReporter = new StepProgressReporter(mock(StepRunRepository.class));
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.getPolling().setInterval(Duration.ofMillis(10));
         properties.getPolling().setTimeout(Duration.ofMillis(150));
-        poller = new StatusPoller(rpaProjectLaunchesPort, rpaProjectQueuePort, properties);
+        poller = new StatusPoller(rpaProjectLaunchesPort, rpaProjectQueuePort, progressReporter, properties);
+        stepRun = new StepRun(1L, 2L);
     }
 
     @Test
@@ -37,7 +42,7 @@ class StatusPollerTest {
         RpaProjectLaunchDto launch = launch(LocalDateTime.now(), true);
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(launch));
 
-        RpaProjectLaunchDto result = poller.pollUntilTerminal(1);
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1);
 
         assertThat(result.isSuccess()).isTrue();
     }
@@ -52,7 +57,7 @@ class StatusPollerTest {
                 .thenReturn(List.of(running))
                 .thenReturn(List.of(completed));
 
-        RpaProjectLaunchDto result = poller.pollUntilTerminal(1);
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1);
 
         assertThat(result.isSuccess()).isFalse();
     }
@@ -63,7 +68,7 @@ class StatusPollerTest {
         when(rpaProjectQueuePort.findByAssignment(1))
                 .thenReturn(List.of(new QueueItemProjectDto(1, 1, null, null, LocalDateTime.now(), null)));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(1))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("в очереди проектов");
     }
@@ -73,7 +78,7 @@ class StatusPollerTest {
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
         when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(1))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("не найдено ни в очереди проектов, ни среди запусков");
     }
@@ -84,7 +89,7 @@ class StatusPollerTest {
                 1, 7, 5, "robot-1", 1, LocalDateTime.now(), null, null, null, LocalDateTime.now());
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(running));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(1))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("robot-1");
     }

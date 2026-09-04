@@ -44,6 +44,15 @@ public class StepRun {
     @Column(name = "error_message")
     private String errorMessage;
 
+    /** Человекочитаемое "что сейчас происходит" — единственный способ узнать прогресс живого шага
+     * (очередь/задание) снаружи, пока он ещё не в терминальном статусе. Обновляется executor'ами
+     * по ходу выполнения (не только в начале/конце), см. {@code StepProgressReporter}. */
+    @Column(name = "detail")
+    private String detail;
+
+    @Column(name = "detail_updated_at")
+    private OffsetDateTime detailUpdatedAt;
+
     protected StepRun() {
     }
 
@@ -67,6 +76,11 @@ public class StepRun {
         this.status = RunStatus.FAILED;
         this.errorMessage = errorMessage;
         this.finishedAt = OffsetDateTime.now();
+    }
+
+    public void updateDetail(String detail) {
+        this.detail = detail;
+        this.detailUpdatedAt = OffsetDateTime.now();
     }
 
     public void setOrchestratorAssignmentId(Integer orchestratorAssignmentId) {
@@ -111,5 +125,13 @@ public class StepRun {
 
     public String getErrorMessage() {
         return errorMessage;
+    }
+
+    public String getDetail() {
+        return detail;
+    }
+
+    public OffsetDateTime getDetailUpdatedAt() {
+        return detailUpdatedAt;
     }
 }

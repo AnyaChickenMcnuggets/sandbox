@@ -80,6 +80,13 @@ management:
       exposure:
         include: health,info
 
+logging:
+  level:
+    # INFO: каждая значимая операция (создание/поиск очереди, старт задания, каждая попытка
+    # поллинга — статус задания и проверки очереди). DEBUG (com.rpatest.execution.engine) — ещё
+    # подробнее, но по сути дублирует то, что уже видно в detail шага через GET /api/v1/runs/{id}.
+    com.rpatest: INFO
+
 jasypt:
   encryptor:
     algorithm: PBEWITHHMACSHA512ANDAES_256

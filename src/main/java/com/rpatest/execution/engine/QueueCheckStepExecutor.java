@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,21 +34,26 @@ import org.springframework.stereotype.Component;
 @Component
 public class QueueCheckStepExecutor implements StepExecutor {
 
+    private static final Logger log = LoggerFactory.getLogger(QueueCheckStepExecutor.class);
+
     private static final int PAGE_SIZE = 200;
     private static final int MAX_PAGES = 50;
 
     private final ExchangeQueuesPort exchangeQueuesPort;
     private final ExchangeQueueProvisioner queueProvisioner;
+    private final StepProgressReporter progressReporter;
     private final OrchestratorProperties properties;
     private final ObjectMapper objectMapper;
 
     public QueueCheckStepExecutor(
             ExchangeQueuesPort exchangeQueuesPort,
             ExchangeQueueProvisioner queueProvisioner,
+            StepProgressReporter progressReporter,
             OrchestratorProperties properties,
             ObjectMapper objectMapper) {
         this.exchangeQueuesPort = exchangeQueuesPort;
         this.queueProvisioner = queueProvisioner;
+        this.progressReporter = progressReporter;
         this.properties = properties;
         this.objectMapper = objectMapper;
     }
@@ -74,21 +81,30 @@ public class QueueCheckStepExecutor implements StepExecutor {
         Duration timeout = config.timeoutSeconds() != null
                 ? Duration.ofSeconds(config.timeoutSeconds()) : defaults.getTimeout();
 
+        log.info("Шаг '{}' (id={}): проверка очереди '{}', ожидание={}, minTotalCount={}, naturalKeys={}"
+                        + " (prefix={}), timeout={}",
+                step.getName(), step.getId(), queueName, expected, minTotalCount, naturalKeyFilter, prefixMatch, timeout);
+
         try {
+            progressReporter.report(stepRun, "Ищу/создаю очередь '" + queueName + "' для проверки");
             // Get-or-create: если очередь ещё не создана предыдущим шагом (например, DAG собран
             // с QUEUE_CHECK раньше соответствующего QUEUE), проверка не должна падать — просто
             // ждём появления элементов в пустой (только что созданной) очереди до таймаута.
             ExchangeQueueDto queue = queueProvisioner.ensureExists(queueName, null, null, null);
             stepRun.setOrchestratorQueueId(queue.id());
+            progressReporter.report(stepRun, "Очередь '" + queueName + "' (id=" + queue.id()
+                    + ") найдена, начинаю проверку. Ожидается: " + describeExpectation(expected, minTotalCount));
 
             pollUntilSatisfied(
-                    queue.id(), queueName, naturalKeyFilter, prefixMatch, expected, minTotalCount, interval, timeout);
+                    stepRun, queue.id(), queueName, naturalKeyFilter, prefixMatch, expected, minTotalCount, interval, timeout);
         } catch (OrchestratorApiException e) {
+            log.error("Шаг '{}': ошибка вызова оркестратора при проверке очереди '{}'", step.getName(), queueName, e);
             throw new StepExecutionException("Не удалось выполнить проверку очереди '" + step.getName() + "'", e);
         }
     }
 
     private void pollUntilSatisfied(
+            StepRun stepRun,
             UUID queueId,
             String queueName,
             Set<String> naturalKeyFilter,
@@ -100,12 +116,20 @@ public class QueueCheckStepExecutor implements StepExecutor {
         Instant deadline = Instant.now().plus(timeout);
         Map<String, Long> actualCounts;
         int actualTotal;
+        int attempt = 0;
         while (true) {
+            attempt++;
             List<ExchangeQueueValueDto> matching = fetchMatchingItems(queueId, naturalKeyFilter, prefixMatch);
             actualCounts = countByStatus(matching);
             actualTotal = matching.size();
 
+            String actualDescription = describeActual(actualCounts, actualTotal);
+            log.debug("Попытка #{} проверки очереди '{}': {}", attempt, queueName, actualDescription);
+            progressReporter.report(stepRun, "Проверка очереди '" + queueName + "' (попытка #" + attempt + "): "
+                    + actualDescription);
+
             if (satisfies(expected, minTotalCount, actualCounts, actualTotal)) {
+                progressReporter.report(stepRun, "Проверка очереди '" + queueName + "' пройдена: " + actualDescription);
                 return;
             }
             if (Instant.now().isAfter(deadline)) {
@@ -158,16 +182,25 @@ public class QueueCheckStepExecutor implements StepExecutor {
         return true;
     }
 
-    private String describe(
-            Map<String, Integer> expected, Integer minTotalCount, Map<String, Long> actualCounts, int actualTotal) {
-        StringBuilder sb = new StringBuilder("Ожидалось: ");
+    private String describeExpectation(Map<String, Integer> expected, Integer minTotalCount) {
+        StringBuilder sb = new StringBuilder();
         expected.forEach((status, count) -> sb.append(status).append("=").append(count).append(" "));
         if (minTotalCount != null) {
-            sb.append("(всего >= ").append(minTotalCount).append(") ");
+            sb.append("(всего >= ").append(minTotalCount).append(")");
         }
-        sb.append("— фактически: всего=").append(actualTotal).append(" ");
+        return sb.length() == 0 ? "(без конкретных ожиданий по количеству)" : sb.toString();
+    }
+
+    private String describeActual(Map<String, Long> actualCounts, int actualTotal) {
+        StringBuilder sb = new StringBuilder("всего=").append(actualTotal).append(" ");
         actualCounts.forEach((status, count) -> sb.append(status).append("=").append(count).append(" "));
         return sb.toString();
+    }
+
+    private String describe(
+            Map<String, Integer> expected, Integer minTotalCount, Map<String, Long> actualCounts, int actualTotal) {
+        return "Ожидалось: " + describeExpectation(expected, minTotalCount) + " — фактически: "
+                + describeActual(actualCounts, actualTotal);
     }
 
     private void sleep(Duration duration) {

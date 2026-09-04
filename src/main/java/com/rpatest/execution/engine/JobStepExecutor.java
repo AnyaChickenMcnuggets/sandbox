@@ -20,6 +20,8 @@ import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,11 +32,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class JobStepExecutor implements StepExecutor {
 
+    private static final Logger log = LoggerFactory.getLogger(JobStepExecutor.class);
+
     private final AssignmentsPort assignmentsPort;
     private final RpaProjectsPort rpaProjectsPort;
     private final RpaProjectVariablesPort rpaProjectVariablesPort;
     private final RpaProjectQueuePort rpaProjectQueuePort;
     private final StatusPoller statusPoller;
+    private final StepProgressReporter progressReporter;
     private final ObjectMapper objectMapper;
 
     public JobStepExecutor(
@@ -43,12 +48,14 @@ public class JobStepExecutor implements StepExecutor {
             RpaProjectVariablesPort rpaProjectVariablesPort,
             RpaProjectQueuePort rpaProjectQueuePort,
             StatusPoller statusPoller,
+            StepProgressReporter progressReporter,
             ObjectMapper objectMapper) {
         this.assignmentsPort = assignmentsPort;
         this.rpaProjectsPort = rpaProjectsPort;
         this.rpaProjectVariablesPort = rpaProjectVariablesPort;
         this.rpaProjectQueuePort = rpaProjectQueuePort;
         this.statusPoller = statusPoller;
+        this.progressReporter = progressReporter;
         this.objectMapper = objectMapper;
     }
 
@@ -60,37 +67,48 @@ public class JobStepExecutor implements StepExecutor {
     @Override
     public void execute(StepRun stepRun, ScenarioStep step) {
         JobStepConfig config = objectMapper.convertValue(step.getConfig(), JobStepConfig.class);
+        log.info("Шаг '{}' (id={}): начинаю выполнение JOB, config={}", step.getName(), step.getId(), config);
         try {
-            int rpaProjectId = resolveProjectId(config, step);
+            int rpaProjectId = resolveProjectId(stepRun, config, step);
 
             // Оркестратор принимает в имени только латиницу/цифры/подчёркивание. Имя также должно
             // быть уникальным для прогона: create() может упасть на поиск по имени (см. фолбэк в
             // AssignmentsClient), а при повторном запуске того же сценария имя шага не уникально.
             String assignmentName = OrchestratorNames.sanitize(
                     step.getName() + "_" + stepRun.getScenarioRunId() + "_" + step.getId());
+            progressReporter.report(stepRun, "Создаю задание '" + assignmentName + "' по проекту id=" + rpaProjectId);
             AssignmentDto created = assignmentsPort.create(
                     AssignmentCreateDto.manualRun(assignmentName, step.getName(), rpaProjectId));
             stepRun.setOrchestratorAssignmentId(created.id());
+            log.info("Шаг '{}': создан Assignment id={} (name='{}')", step.getName(), created.id(), assignmentName);
 
-            applyArguments(created.id(), config.argumentsOrEmpty());
+            applyArguments(stepRun, created.id(), config.argumentsOrEmpty());
 
+            progressReporter.report(stepRun, "Запускаю задание id=" + created.id());
             assignmentsPort.start(created.id());
-            RpaProjectLaunchDto launch = statusPoller.pollUntilTerminal(created.id());
+            log.info("Шаг '{}': Assignment id={} запущен (Start), начинаю отслеживание", step.getName(), created.id());
+
+            RpaProjectLaunchDto launch = statusPoller.pollUntilTerminal(stepRun, created.id());
+            log.info("Шаг '{}': Assignment id={} завершён, success={}, robot='{}'",
+                    step.getName(), created.id(), launch.isSuccess(), launch.robotName());
             if (!launch.isSuccess()) {
                 throw new StepExecutionException("Задание завершилось с ошибкой на роботе '" + launch.robotName()
                         + "'" + describeError(created.id()));
             }
         } catch (OrchestratorApiException e) {
+            log.error("Шаг '{}': ошибка вызова оркестратора", step.getName(), e);
             throw new StepExecutionException("Не удалось выполнить шаг задания '" + step.getName() + "'", e);
         }
     }
 
-    private int resolveProjectId(JobStepConfig config, ScenarioStep step) {
+    private int resolveProjectId(StepRun stepRun, JobStepConfig config, ScenarioStep step) {
         if (config.hasProjectName()) {
+            progressReporter.report(stepRun, "Ищу проект по имени '" + config.rpaProjectName() + "'");
             RpaProjectShortDto project = rpaProjectsPort.findByName(config.rpaProjectName())
                     .orElseThrow(() -> new StepExecutionException(
                             "Проект '" + config.rpaProjectName() + "' не найден в оркестраторе (шаг '"
                                     + step.getName() + "')"));
+            log.info("Шаг '{}': проект '{}' резолвлен в id={}", step.getName(), config.rpaProjectName(), project.id());
             return project.id();
         }
         if (config.rpaProjectId() != null) {
@@ -109,10 +127,11 @@ public class JobStepExecutor implements StepExecutor {
                 .orElse("");
     }
 
-    private void applyArguments(int assignmentId, Map<String, String> arguments) {
+    private void applyArguments(StepRun stepRun, int assignmentId, Map<String, String> arguments) {
         if (arguments.isEmpty()) {
             return;
         }
+        progressReporter.report(stepRun, "Выставляю аргументы задания id=" + assignmentId + ": " + arguments.keySet());
         List<RpaProjectVariableDto> variables = rpaProjectVariablesPort.get(assignmentId);
         List<RpaProjectVariableEditByIdDto> edits = variables.stream()
                 .filter(v -> arguments.containsKey(v.name()))
@@ -120,6 +139,9 @@ public class JobStepExecutor implements StepExecutor {
                 .toList();
         if (!edits.isEmpty()) {
             rpaProjectVariablesPort.update(assignmentId, edits);
+            log.info("Задание id={}: применено {} аргумент(ов)", assignmentId, edits.size());
+        } else {
+            log.warn("Задание id={}: ни один из ключей {} не совпал с переменными проекта", assignmentId, arguments.keySet());
         }
     }
 }
