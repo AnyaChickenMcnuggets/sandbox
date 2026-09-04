@@ -64,6 +64,12 @@ public class ScenarioExecutionEngine {
             Map<Long, ScenarioStep> stepsById = new HashMap<>();
             steps.forEach(s -> stepsById.put(s.getId(), s));
 
+            // Заводим StepRun(PENDING) на каждый шаг сценария сразу, до начала обхода DAG — иначе
+            // шаги, до которых обход ещё не дошёл (например, QUEUE_CHECK после ещё выполняющегося
+            // JOB), просто отсутствуют в GET /api/v1/runs/{runId} вместо того чтобы быть видны как
+            // "ещё не начался", и по ответу нельзя понять всю топологию прогона заранее.
+            stepRunRepository.saveAll(steps.stream().map(s -> new StepRun(runId, s.getId())).toList());
+
             List<Long> stepIds = steps.stream().map(ScenarioStep::getId).toList();
             List<ScenarioStepEdge> edges = stepIds.isEmpty() ? List.of() : edgeRepository.findByStepIds(stepIds);
 
@@ -125,7 +131,8 @@ public class ScenarioExecutionEngine {
     }
 
     private RunStatus runStep(ScenarioRun run, ScenarioStep step) {
-        StepRun stepRun = new StepRun(run.getId(), step.getId());
+        StepRun stepRun = stepRunRepository.findByScenarioRunIdAndStepId(run.getId(), step.getId())
+                .orElseGet(() -> new StepRun(run.getId(), step.getId()));
         stepRun.markRunning();
         stepRun = stepRunRepository.save(stepRun);
         log.info("Прогон {}: шаг '{}' (id={}, тип={}) начат", run.getId(), step.getName(), step.getId(), step.getType());

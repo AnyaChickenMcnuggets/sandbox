@@ -174,6 +174,41 @@ Backend для автоматизации тестирования задани�
       новом укладывается в единицы миллисекунд
 - [x] 130 тестов (было 129), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 15 — Полная топология шагов видна с начала прогона — DONE
+Пользователь после Sprint 14 (дедлок исправлен, но): даже пока `job` ещё в `RUNNING`, шагов
+`QUEUE_CHECK` (`checkInput`/`checkOutput`) вообще нет в `steps[]` ответа `GET
+/api/v1/runs/{runId}` — непонятно, есть ли они в сценарии вообще. Причина: `StepRun` заводился
+только в момент, когда обход DAG реально доходил до шага — то есть шаг, до которого очередь ещё не
+дошла, был неотличим от "такого шага в сценарии нет".
+- [x] `ScenarioExecutionEngine.runScenario` теперь создаёт `StepRun(PENDING)` на все шаги сценария
+      сразу, до начала обхода DAG (`stepRunRepository.saveAll(...)`)
+- [x] `runStep` ищет уже существующую (пре-созданную) строку через новый метод
+      `StepRunRepository.findByScenarioRunIdAndStepId` вместо создания новой — так шаг, который
+      начал выполняться, обновляет ту же строку, что была видна как `PENDING`
+- [x] Тест `preCreatesPendingStepRunsForNotYetReachedStepsSoFullTopologyIsVisibleImmediately` —
+      напрямую воспроизводит жалобу пользователя: реальный пул потоков + блокирующий `JOB`-шаг,
+      проверка, что соседний ещё не начавшийся `QUEUE_CHECK` уже виден как `PENDING`, пока `JOB`
+      выполняется
+- [x] `skipsChildStepsWhenParentFails` обновлён под новое поведение — пропущенный шаг остаётся
+      `PENDING` (раньше для него вообще не было строки)
+- [x] 132 теста (было 130), `mvn verify` (JaCoCo) — зелёный
+
+## Sprint 16 — Удалённые транзакции и порядок шагов в ответе — DONE
+Два замечания пользователя после Sprint 15: (1) `QUEUE_CHECK` должен игнорировать удалённые
+транзакции при подсчёте статусов; (2) `steps[]` в `GET /api/v1/runs/{runId}` выдаётся вперемешку,
+а не в порядке выполнения сценария.
+- [x] `QueueCheckStepExecutor.fetchMatchingItems` фильтрует `ExchangeQueueValueDto.deletedAt !=
+      null` до подсчёта количеств по статусу — удалённый элемент больше не искажает
+      `expectedStatusCounts`/`minTotalCount`. `QueueAuditService` (ручной аудит) не тронут —
+      удалённые транзакции там по-прежнему видны, это осознанно (полезно для отладки)
+- [x] `ExecutionService.toResponse` сортирует `steps[]` по `ScenarioStep.position` вместо порядка
+      возврата `StepRunRepository.findByScenarioRunId` (тот ничего не гарантирует про порядок,
+      особенно после Sprint 15 — все `StepRun` заводятся одним `saveAll`)
+- [x] Тесты: `excludesDeletedTransactionsFromCounts` (`QueueCheckStepExecutorTest`),
+      `getRunOrdersStepsByScenarioPositionRegardlessOfRepositoryReturnOrder`
+      (`ExecutionServiceTest`)
+- [x] 134 теста (было 132), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

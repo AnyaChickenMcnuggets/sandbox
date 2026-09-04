@@ -21,6 +21,7 @@ import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -65,6 +66,24 @@ class QueueCheckStepExecutorTest {
         executor.execute(stepRun, step);
 
         assertThat(stepRun.getOrchestratorQueueId()).isEqualTo(queueId);
+    }
+
+    @Test
+    void excludesDeletedTransactionsFromCounts() {
+        // удалённая транзакция (deletedAt != null) не должна влиять на исход проверки — иначе
+        // ручное или автоматическое удаление элемента из очереди искажает результат
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
+                item("k1", ExchangeQueueValueEventType.SUCCESS),
+                deletedItem("k2", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of(
+                "queueName", "q",
+                "expectedStatusCounts", Map.of("SUCCESS", 1)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
     }
 
     @Test
@@ -205,6 +224,10 @@ class QueueCheckStepExecutorTest {
 
     private ExchangeQueueValueDto item(String naturalKey, ExchangeQueueValueEventType eventType) {
         return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, null, eventType, null);
+    }
+
+    private ExchangeQueueValueDto deletedItem(String naturalKey, ExchangeQueueValueEventType eventType) {
+        return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, LocalDateTime.now(), eventType, null);
     }
 
     private ScenarioStep step(Map<String, Object> config) {

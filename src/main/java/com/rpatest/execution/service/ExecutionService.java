@@ -13,6 +13,7 @@ import com.rpatest.orchestrator.client.AssignmentsPort;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.repository.ScenarioStepRepository;
 import com.rpatest.scenario.repository.TestScenarioRepository;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +99,13 @@ public class ExecutionService {
                     .forEach(s -> stepsById.put(s.getId(), s));
         }
         List<StepRunResponse> stepResponses = steps.stream()
+                // Порядок вставки StepRun (все PENDING заводятся разом при старте рана, см.
+                // ScenarioExecutionEngine) не совпадает с порядком выполнения шагов в сценарии —
+                // сортируем по ScenarioStep.position, той же величине, по которой движок обходит DAG.
+                .sorted(Comparator.comparingInt(s -> {
+                    ScenarioStep step = stepsById.get(s.getStepId());
+                    return step != null ? step.getPosition() : Integer.MAX_VALUE;
+                }))
                 .map(s -> {
                     ScenarioStep step = stepsById.get(s.getStepId());
                     return new StepRunResponse(

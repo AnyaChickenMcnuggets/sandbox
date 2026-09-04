@@ -17,9 +17,13 @@ import com.rpatest.execution.engine.ScenarioExecutionEngine;
 import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.execution.web.RunResponse;
+import com.rpatest.execution.web.StepRunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
+import com.rpatest.scenario.domain.ScenarioStep;
+import com.rpatest.scenario.domain.ScenarioStepType;
 import com.rpatest.scenario.repository.ScenarioStepRepository;
 import com.rpatest.scenario.repository.TestScenarioRepository;
+import java.util.Map;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
@@ -88,6 +92,29 @@ class ExecutionServiceTest {
 
         assertThat(response.steps()).hasSize(1);
         assertThat(response.steps().get(0).stepId()).isEqualTo(5L);
+    }
+
+    @Test
+    void getRunOrdersStepsByScenarioPositionRegardlessOfRepositoryReturnOrder() {
+        // StepRun(PENDING) заводятся все разом при старте рана (см. ScenarioExecutionEngine), а
+        // findByScenarioRunId ничего не гарантирует про порядок — сортировать нужно по позиции
+        // шага в сценарии, а не полагаться на порядок из БД
+        ScenarioRun run = run(100L, 1L);
+        when(runRepository.findById(100L)).thenReturn(Optional.of(run));
+
+        StepRun stepRunB = new StepRun(100L, 20L);
+        StepRun stepRunA = new StepRun(100L, 10L);
+        when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of(stepRunB, stepRunA));
+
+        ScenarioStep stepA = new ScenarioStep(1L, ScenarioStepType.QUEUE, "a", Map.of(), 0);
+        setId(stepA, 10L);
+        ScenarioStep stepB = new ScenarioStep(1L, ScenarioStepType.QUEUE, "b", Map.of(), 1);
+        setId(stepB, 20L);
+        when(scenarioStepRepository.findAllById(any())).thenReturn(List.of(stepB, stepA));
+
+        RunResponse response = service.getRun(100L);
+
+        assertThat(response.steps()).extracting(StepRunResponse::stepId).containsExactly(10L, 20L);
     }
 
     @Test

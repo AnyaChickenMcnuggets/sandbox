@@ -2,6 +2,7 @@ package com.rpatest.execution.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -19,13 +20,17 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,7 +66,26 @@ class ScenarioExecutionEngineTest {
             savedStepRunsById.put(stepRun.getId(), stepRun);
             return stepRun;
         });
+        when(stepRunRepository.saveAll(any())).thenAnswer(inv -> {
+            List<StepRun> toSave = inv.getArgument(0);
+            List<StepRun> saved = new ArrayList<>();
+            for (StepRun stepRun : toSave) {
+                if (stepRun.getId() == null) {
+                    setId(stepRun, stepRunIdSeq.getAndIncrement());
+                }
+                savedStepRunsById.put(stepRun.getId(), stepRun);
+                saved.add(stepRun);
+            }
+            return saved;
+        });
         when(stepRunRepository.findByScenarioRunId(10L)).thenAnswer(inv -> List.copyOf(savedStepRunsById.values()));
+        when(stepRunRepository.findByScenarioRunIdAndStepId(anyLong(), anyLong())).thenAnswer(inv -> {
+            Long scenarioRunId = inv.getArgument(0);
+            Long stepId = inv.getArgument(1);
+            return savedStepRunsById.values().stream()
+                    .filter(sr -> sr.getScenarioRunId().equals(scenarioRunId) && sr.getStepId().equals(stepId))
+                    .findFirst();
+        });
     }
 
     @Test
@@ -112,9 +136,77 @@ class ScenarioExecutionEngineTest {
 
         engine.runScenario(10L);
 
-        assertThat(savedStepRunsById).hasSize(1);
-        assertThat(savedStepRunsById.values().iterator().next().getStatus()).isEqualTo(RunStatus.FAILED);
+        // queueA пре-создаётся как PENDING вместе со всеми шагами сценария (см. новый тест ниже),
+        // но так и остаётся PENDING — до него обход DAG не доходит, потому что job упал
+        assertThat(savedStepRunsById).hasSize(2);
+        StepRun jobRun = stepRunFor(1L);
+        StepRun queueARun = stepRunFor(2L);
+        assertThat(jobRun.getStatus()).isEqualTo(RunStatus.FAILED);
+        assertThat(queueARun.getStatus()).isEqualTo(RunStatus.PENDING);
         assertThat(run.getStatus()).isEqualTo(RunStatus.FAILED);
+    }
+
+    @Test
+    void preCreatesPendingStepRunsForNotYetReachedStepsSoFullTopologyIsVisibleImmediately() throws InterruptedException {
+        // Пользователь: пока JOB ещё выполняется, последующий QUEUE_CHECK вообще не виден в
+        // GET /api/v1/runs/{runId} — непонятно, что это за этап и вообще есть ли он в сценарии.
+        // StepRun для шага раньше создавался только когда обход DAG до него реально доходил;
+        // теперь все StepRun сценария заводятся как PENDING сразу в начале runScenario, до обхода.
+        ScenarioStep job = step(1L, ScenarioStepType.JOB, "job");
+        ScenarioStep checkInput = step(2L, ScenarioStepType.QUEUE_CHECK, "checkInput");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(job, checkInput));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of(new ScenarioStepEdge(1L, 2L)));
+
+        CountDownLatch jobStarted = new CountDownLatch(1);
+        CountDownLatch releaseJob = new CountDownLatch(1);
+        StepExecutor blockingJobExecutor = new StepExecutor() {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.JOB;
+            }
+
+            @Override
+            public void execute(StepRun stepRun, ScenarioStep step) {
+                jobStarted.countDown();
+                try {
+                    assertThat(releaseJob.await(5, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+        StepExecutor queueCheckExecutor = new RecordingExecutor(null) {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.QUEUE_CHECK;
+            }
+        };
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                    stepRepository, edgeRepository, runRepository, stepRunRepository,
+                    List.of(blockingJobExecutor, queueCheckExecutor), pool);
+
+            CompletableFuture<Void> runFuture = CompletableFuture.runAsync(() -> engine.runScenario(10L), pool);
+            assertThat(jobStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.PENDING);
+
+            releaseJob.countDown();
+            runFuture.join();
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+    }
+
+    private StepRun stepRunFor(Long stepId) {
+        return savedStepRunsById.values().stream()
+                .filter(sr -> sr.getStepId().equals(stepId))
+                .findFirst()
+                .orElseThrow();
     }
 
     @Test

@@ -152,6 +152,10 @@ public class QueueCheckStepExecutor implements StepExecutor {
                 break;
             }
         }
+        // Удалённые транзакции (deletedAt != null) не должны влиять на исход проверки — иначе
+        // удаление элемента из очереди (вручную или самим оркестратором) искажает и общее число
+        // элементов, и распределение по статусам, которое сравнивается с ожиданием сценария.
+        all = all.stream().filter(i -> i.deletedAt() == null).toList();
         if (naturalKeyFilter.isEmpty()) {
             return all;
         }
