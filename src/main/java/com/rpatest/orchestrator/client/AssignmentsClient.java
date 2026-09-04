@@ -67,7 +67,11 @@ public class AssignmentsClient implements AssignmentsPort {
     }
 
     @Override
-    @Retry(name = "orchestrator-write")
+    // Без @Retry: Start ставит проект задания в очередь ожидания оркестратора, повторное
+    // выполнения повторного запроса после сетевого таймаута (когда первый Start на самом деле
+    // прошёл) приведёт к ошибке "запрещены повторы в очереди ожидания" — orchestrator не
+    // допускает второй одновременный запуск того же RpaProject. Дублировать неидемпотентный
+    // Start ради устойчивости к сети не стоит: пусть шаг явно упадёт, чем тихо задублируется.
     @CircuitBreaker(name = "orchestrator")
     public void start(int assignmentId) {
         OrchestratorClientSupport.execute("start assignment " + assignmentId, () -> restClient.put()
@@ -77,7 +81,7 @@ public class AssignmentsClient implements AssignmentsPort {
     }
 
     @Override
-    @Retry(name = "orchestrator-write")
+    // Тот же аргумент, что и у start(): неидемпотентная смена состояния, без @Retry.
     @CircuitBreaker(name = "orchestrator")
     public void stop(int assignmentId) {
         OrchestratorClientSupport.execute("stop assignment " + assignmentId, () -> restClient.put()
