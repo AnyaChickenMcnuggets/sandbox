@@ -6,7 +6,6 @@ import com.rpatest.execution.engine.config.QueueStepConfig;
 import com.rpatest.execution.engine.config.TransactionTemplate;
 import com.rpatest.orchestrator.client.ExchangeQueuesPort;
 import com.rpatest.orchestrator.dto.EnqueueExchangeQueueDto;
-import com.rpatest.orchestrator.dto.ExchangeQueueCreateDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.orchestrator.util.OrchestratorNames;
@@ -14,14 +13,18 @@ import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import org.springframework.stereotype.Component;
 
+/** Обеспечивает существование очереди (использует существующую или создаёт) и добавляет транзакции. */
 @Component
 public class QueueStepExecutor implements StepExecutor {
 
     private final ExchangeQueuesPort exchangeQueuesPort;
+    private final ExchangeQueueProvisioner queueProvisioner;
     private final ObjectMapper objectMapper;
 
-    public QueueStepExecutor(ExchangeQueuesPort exchangeQueuesPort, ObjectMapper objectMapper) {
+    public QueueStepExecutor(
+            ExchangeQueuesPort exchangeQueuesPort, ExchangeQueueProvisioner queueProvisioner, ObjectMapper objectMapper) {
         this.exchangeQueuesPort = exchangeQueuesPort;
+        this.queueProvisioner = queueProvisioner;
         this.objectMapper = objectMapper;
     }
 
@@ -36,12 +39,8 @@ public class QueueStepExecutor implements StepExecutor {
         // Оркестратор принимает в имени очереди только латиницу/цифры/подчёркивание.
         String queueName = OrchestratorNames.sanitize(config.name());
         try {
-            exchangeQueuesPort.create(new ExchangeQueueCreateDto(
-                    queueName, config.description(), true, config.ttl(), config.maxRetray(), false, true));
-
-            ExchangeQueueDto queue = exchangeQueuesPort.findByName(queueName)
-                    .orElseThrow(() -> new StepExecutionException(
-                            "Очередь '" + queueName + "' не найдена в оркестраторе сразу после создания"));
+            ExchangeQueueDto queue =
+                    queueProvisioner.ensureExists(queueName, config.description(), config.ttl(), config.maxRetray());
             stepRun.setOrchestratorQueueId(queue.id());
 
             for (TransactionTemplate transaction : config.transactionsOrEmpty()) {

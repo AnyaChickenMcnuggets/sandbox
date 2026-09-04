@@ -6,55 +6,94 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.rpatest.config.OrchestratorProperties;
-import com.rpatest.orchestrator.client.AssignmentsPort;
-import com.rpatest.orchestrator.dto.AssignmentDto;
-import com.rpatest.orchestrator.dto.AssignmentStatus;
+import com.rpatest.orchestrator.client.RpaProjectLaunchesPort;
+import com.rpatest.orchestrator.client.RpaProjectQueuePort;
+import com.rpatest.orchestrator.dto.QueueItemProjectDto;
+import com.rpatest.orchestrator.dto.RpaProjectLaunchDto;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class StatusPollerTest {
 
-    private AssignmentsPort assignmentsPort;
-    private OrchestratorProperties properties;
+    private RpaProjectLaunchesPort rpaProjectLaunchesPort;
+    private RpaProjectQueuePort rpaProjectQueuePort;
     private StatusPoller poller;
 
     @BeforeEach
     void setUp() {
-        assignmentsPort = mock(AssignmentsPort.class);
-        properties = new OrchestratorProperties();
+        rpaProjectLaunchesPort = mock(RpaProjectLaunchesPort.class);
+        rpaProjectQueuePort = mock(RpaProjectQueuePort.class);
+        OrchestratorProperties properties = new OrchestratorProperties();
         properties.getPolling().setInterval(Duration.ofMillis(10));
-        properties.getPolling().setTimeout(Duration.ofMillis(200));
-        poller = new StatusPoller(assignmentsPort, properties);
+        properties.getPolling().setTimeout(Duration.ofMillis(150));
+        poller = new StatusPoller(rpaProjectLaunchesPort, rpaProjectQueuePort, properties);
     }
 
     @Test
-    void returnsImmediatelyWhenAlreadyTerminal() {
-        when(assignmentsPort.get(1))
-                .thenReturn(new AssignmentDto(1, "n", "d", 1, AssignmentStatus.COMPLETE, null, null, null));
+    void returnsImmediatelyWhenLaunchAlreadyCompleted() {
+        RpaProjectLaunchDto launch = launch(LocalDateTime.now(), true);
+        when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(launch));
 
-        AssignmentDto result = poller.pollUntilTerminal(1);
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(1);
 
-        assertThat(result.status()).isEqualTo(AssignmentStatus.COMPLETE);
+        assertThat(result.isSuccess()).isTrue();
     }
 
     @Test
-    void pollsUntilTerminalStatusReached() {
-        when(assignmentsPort.get(1))
-                .thenReturn(new AssignmentDto(1, "n", "d", 1, AssignmentStatus.RUNNING, null, null, null))
-                .thenReturn(new AssignmentDto(1, "n", "d", 1, AssignmentStatus.RUNNING, null, null, null))
-                .thenReturn(new AssignmentDto(1, "n", "d", 1, AssignmentStatus.ERROR, null, null, "fail"));
+    void pollsUntilLaunchAppearsAndCompletes() {
+        RpaProjectLaunchDto running = new RpaProjectLaunchDto(
+                1, 7, 5, "robot-1", 1, LocalDateTime.now(), null, null, null, LocalDateTime.now());
+        RpaProjectLaunchDto completed = launchWithSuccess(LocalDateTime.now(), false);
+        when(rpaProjectLaunchesPort.getByAssignment(1))
+                .thenReturn(List.of())
+                .thenReturn(List.of(running))
+                .thenReturn(List.of(completed));
 
-        AssignmentDto result = poller.pollUntilTerminal(1);
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(1);
 
-        assertThat(result.status()).isEqualTo(AssignmentStatus.ERROR);
+        assertThat(result.isSuccess()).isFalse();
     }
 
     @Test
-    void throwsOnTimeoutWhenNeverTerminal() {
-        when(assignmentsPort.get(1))
-                .thenReturn(new AssignmentDto(1, "n", "d", 1, AssignmentStatus.RUNNING, null, null, null));
+    void throwsWithQueueDiagnosticsWhenNeverPickedUpByRobot() {
+        when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
+        when(rpaProjectQueuePort.findByAssignment(1))
+                .thenReturn(List.of(new QueueItemProjectDto(1, 1, null, null, LocalDateTime.now(), null)));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(1)).isInstanceOf(StepExecutionException.class);
+        assertThatThrownBy(() -> poller.pollUntilTerminal(1))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("в очереди проектов");
+    }
+
+    @Test
+    void throwsWithNotFoundDiagnosticsWhenNeitherQueuedNorLaunched() {
+        when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
+        when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> poller.pollUntilTerminal(1))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("не найдено ни в очереди проектов, ни среди запусков");
+    }
+
+    @Test
+    void throwsWithRobotDiagnosticsWhenStuckRunning() {
+        RpaProjectLaunchDto running = new RpaProjectLaunchDto(
+                1, 7, 5, "robot-1", 1, LocalDateTime.now(), null, null, null, LocalDateTime.now());
+        when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(running));
+
+        assertThatThrownBy(() -> poller.pollUntilTerminal(1))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("robot-1");
+    }
+
+    private RpaProjectLaunchDto launch(LocalDateTime startedAt, boolean success) {
+        return new RpaProjectLaunchDto(1, 7, 5, "robot-1", 1, startedAt, LocalDateTime.now(), success, null, startedAt);
+    }
+
+    private RpaProjectLaunchDto launchWithSuccess(LocalDateTime startedAt, boolean success) {
+        return launch(startedAt, success);
     }
 }

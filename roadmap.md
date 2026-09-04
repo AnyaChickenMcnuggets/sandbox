@@ -87,6 +87,25 @@ Backend для автоматизации тестирования задани�
 - [x] `QueueCheckStepExecutor`, конфиг `orchestrator.queue-check-polling.*`, unit-тесты
 - [x] `QueueAuditService`/`QueueItemResponse` возвращают `naturalKey` и производный статус
 
+## Sprint 10 — Реальное отслеживание выполнения + идемпотентные очереди — DONE
+Уточнение от пользователя: (1) `QUEUE_CHECK` после `JOB` — это опциональная бизнес-проверка,
+а не единственный способ узнать, что задание реально выполнилось: сам `JobStepExecutor` обязан
+отслеживать реальный запуск на роботе, даже если после него в сценарии вообще нет `QUEUE_CHECK`.
+(2) Создание очереди/транзакций должно быть идемпотентным ("используй существующую, если есть") —
+`Assignment` при этом всегда создаётся заново и удаляется после прогона.
+- [x] `RpaProjectLaunchDto`/`QueueItemProjectDto`/`ListResultDto<T>`, `RpaProjectLaunchesPort` +
+      `RpaProjectLaunchesClient` (`GET /api/RpaProjectLaunches/assignment/{assignmentId}`),
+      `RpaProjectQueuePort` + `RpaProjectQueueClient` (`GET /api/RpaProjectQueue?AssignmentId=`)
+- [x] `StatusPoller` переписан: источник истины — `RpaProjectLaunches` (реальный запуск на
+      роботе, `completedAt`/`killedAt`/`success`), а не `AssignmentStatus`. Диагностика таймаута
+      различает "всё ещё в очереди проектов" / "выполняется на роботе X, не завершилось" /
+      "не найдено нигде"
+- [x] `JobStepExecutor` берёт текст ошибки из `RpaProjectQueue.errorMsg` при `success=false`
+- [x] `ExchangeQueueProvisioner.ensureExists` (find-or-create) — общий паттерн, теперь и
+      `QueueStepExecutor`, и `QueueCheckStepExecutor` используют существующую очередь вместо
+      падения на конфликте имени или ошибки "не найдена"
+- [x] 121 тест (было 108), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
@@ -103,15 +122,19 @@ Backend для автоматизации тестирования задани�
   проектом (два прогона одного сценария, две ветки на один проект) — стоит решить, добавлять ли
   проверку "проект уже занят" на нашей стороне заранее, с понятным сообщением, вместо ожидания
   ошибки от оркестратора. См. `TESTING.md` разделы 2/5/7.
-- `POST /api/ExchangeQueues` подтверждён пользователем как рабочий, но поведение при повторном
-  создании очереди с уже существующим именем (при повторном запуске того же сценария без cleanup)
-  не проверено — см. `TESTING.md` раздел 9. Если окажется, что оркестратор отвечает ошибкой
-  конфликта — `QueueStepExecutor.create` нужно будет сделать идемпотентным (`findByName` перед
-  `create`, пропускать создание, если очередь уже есть).
-- `StatusPoller`/`ExecutionService.stopRun` не считают `PAUSED` терминальным статусом: после ручной
-  остановки задания (`PUT /Assignments/{id}/Stop`) поллер в других (ещё не остановленных) шагах
-  продолжит ждать `Complete`/`Error` до таймаута — не критично, но стоит уточнить у оркестратора,
-  в какой статус реально переходит остановленное задание.
+- ~~`POST /api/ExchangeQueues` на уже существующее имя (повторный прогон без cleanup)~~ — больше
+  не актуально: `ExchangeQueueProvisioner` (Sprint 10) делает создание очереди идемпотентным
+  (find-or-create), `POST` теперь вызывается только когда очереди действительно ещё нет.
+- ~~Диагностика ошибок оркестратора без URL/метода вызова~~ — исправлено: `ScenarioExecutionEngine`
+  теперь дописывает в `StepRun.errorMessage` всю цепочку причин (`describeWithCauses`), а не только
+  верхний текст-обёртку.
+- `ExecutionService.stopRun` помечает `StepRun` `FAILED` немедленно и напрямую (не дожидаясь
+  `StatusPoller`), а поток `JobStepExecutor`, всё ещё блокированный в `pollUntilTerminal`, узнаёт
+  об остановке только когда (и если) в `RpaProjectLaunches` появится запись с `killedAt` — до этого
+  момента, а в худшем случае до собственного таймаута, он продолжает опрашивать. Гонка за запись в
+  одну и ту же строку `step_run` (HTTP-поток `/stop` и async-поток движка) не проверялась на
+  реальном стенде — не проверено, действительно ли `PUT /Assignments/{id}/Stop` быстро приводит к
+  `killedAt` в `RpaProjectLaunches`.
 - `ScenarioStepRepositoryIT` (Testcontainers) не запускался в этой сессии — в текущем окружении
   нет Docker. Прогнать в CI/локально с Docker перед мёржем.
 - ~~В `TESTING.md` очередь-приёмник результата (`queueOut`) была потомком `job1`, хотя её текст

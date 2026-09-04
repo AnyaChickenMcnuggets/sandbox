@@ -4,10 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.engine.config.JobStepConfig;
 import com.rpatest.orchestrator.client.AssignmentsPort;
+import com.rpatest.orchestrator.client.RpaProjectQueuePort;
 import com.rpatest.orchestrator.client.RpaProjectVariablesPort;
 import com.rpatest.orchestrator.dto.AssignmentCreateDto;
 import com.rpatest.orchestrator.dto.AssignmentDto;
-import com.rpatest.orchestrator.dto.AssignmentStatus;
+import com.rpatest.orchestrator.dto.QueueItemProjectDto;
+import com.rpatest.orchestrator.dto.RpaProjectLaunchDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableEditByIdDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
@@ -18,21 +20,29 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * Создаёт и стартует Assignment, затем ждёт реального завершения на роботе (см. {@link
+ * StatusPoller}) — статус самого Assignment ({@code Complete}) означает только, что оркестратор
+ * принял его в очередь выполнения, и потому здесь не используется как признак успеха.
+ */
 @Component
 public class JobStepExecutor implements StepExecutor {
 
     private final AssignmentsPort assignmentsPort;
     private final RpaProjectVariablesPort rpaProjectVariablesPort;
+    private final RpaProjectQueuePort rpaProjectQueuePort;
     private final StatusPoller statusPoller;
     private final ObjectMapper objectMapper;
 
     public JobStepExecutor(
             AssignmentsPort assignmentsPort,
             RpaProjectVariablesPort rpaProjectVariablesPort,
+            RpaProjectQueuePort rpaProjectQueuePort,
             StatusPoller statusPoller,
             ObjectMapper objectMapper) {
         this.assignmentsPort = assignmentsPort;
         this.rpaProjectVariablesPort = rpaProjectVariablesPort;
+        this.rpaProjectQueuePort = rpaProjectQueuePort;
         this.statusPoller = statusPoller;
         this.objectMapper = objectMapper;
     }
@@ -58,14 +68,23 @@ public class JobStepExecutor implements StepExecutor {
             applyArguments(created.id(), config.argumentsOrEmpty());
 
             assignmentsPort.start(created.id());
-            AssignmentDto finalState = statusPoller.pollUntilTerminal(created.id());
-            if (finalState.status() == AssignmentStatus.ERROR) {
-                throw new StepExecutionException(
-                        "Задание завершилось с ошибкой: " + finalState.lastErrorMsg());
+            RpaProjectLaunchDto launch = statusPoller.pollUntilTerminal(created.id());
+            if (!launch.isSuccess()) {
+                throw new StepExecutionException("Задание завершилось с ошибкой на роботе '" + launch.robotName()
+                        + "'" + describeError(created.id()));
             }
         } catch (OrchestratorApiException e) {
             throw new StepExecutionException("Не удалось выполнить шаг задания '" + step.getName() + "'", e);
         }
+    }
+
+    private String describeError(int assignmentId) {
+        return rpaProjectQueuePort.findByAssignment(assignmentId).stream()
+                .map(QueueItemProjectDto::errorMsg)
+                .filter(msg -> msg != null && !msg.isBlank())
+                .findFirst()
+                .map(msg -> ": " + msg)
+                .orElse("");
     }
 
     private void applyArguments(int assignmentId, Map<String, String> arguments) {

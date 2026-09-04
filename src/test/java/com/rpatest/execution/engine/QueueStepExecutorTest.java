@@ -32,7 +32,7 @@ class QueueStepExecutorTest {
     @BeforeEach
     void setUp() {
         exchangeQueuesPort = mock(ExchangeQueuesPort.class);
-        executor = new QueueStepExecutor(exchangeQueuesPort, new ObjectMapper());
+        executor = new QueueStepExecutor(exchangeQueuesPort, new ExchangeQueueProvisioner(exchangeQueuesPort), new ObjectMapper());
     }
 
     @Test
@@ -41,13 +41,14 @@ class QueueStepExecutorTest {
     }
 
     @Test
-    void createsQueueAndEnqueuesTransactions() {
+    void createsQueueWhenMissingAndEnqueuesTransactions() {
         UUID queueId = UUID.randomUUID();
         ScenarioStep step = step("My Queue", Map.of(
                 "name", "my_queue",
                 "transactions", List.of(Map.of("naturalKey", "k1", "value", "v1"))));
         StepRun stepRun = new StepRun(10L, 5L);
         when(exchangeQueuesPort.findByName("my_queue"))
+                .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 0, 0)));
 
         executor.execute(stepRun, step);
@@ -55,6 +56,20 @@ class QueueStepExecutorTest {
         assertThat(stepRun.getOrchestratorQueueId()).isEqualTo(queueId);
         verify(exchangeQueuesPort).create(any());
         verify(exchangeQueuesPort, times(1)).enqueue(eq("my_queue"), any());
+    }
+
+    @Test
+    void reusesExistingQueueWithoutRecreatingIt() {
+        UUID queueId = UUID.randomUUID();
+        ScenarioStep step = step("My Queue", Map.of("name", "my_queue"));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(exchangeQueuesPort.findByName("my_queue"))
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 3, 0)));
+
+        executor.execute(stepRun, step);
+
+        assertThat(stepRun.getOrchestratorQueueId()).isEqualTo(queueId);
+        verify(exchangeQueuesPort, never()).create(any());
     }
 
     @Test
@@ -83,7 +98,7 @@ class QueueStepExecutorTest {
     }
 
     @Test
-    void throwsWhenQueueNotFoundAfterCreate() {
+    void throwsWhenQueueStillNotFoundAfterCreate() {
         ScenarioStep step = step("Queue", Map.of("name", "q"));
         StepRun stepRun = new StepRun(10L, 5L);
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.empty());
@@ -95,6 +110,7 @@ class QueueStepExecutorTest {
     void wrapsOrchestratorApiExceptionIntoStepExecutionException() {
         ScenarioStep step = step("Queue", Map.of("name", "q"));
         StepRun stepRun = new StepRun(10L, 5L);
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.empty());
         org.mockito.Mockito.doThrow(new OrchestratorApiException("boom")).when(exchangeQueuesPort).create(any());
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))

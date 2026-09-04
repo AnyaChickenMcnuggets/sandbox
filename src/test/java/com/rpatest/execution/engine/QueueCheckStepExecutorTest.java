@@ -2,7 +2,10 @@ package com.rpatest.execution.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +38,8 @@ class QueueCheckStepExecutorTest {
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.getQueueCheckPolling().setInterval(Duration.ofMillis(10));
         properties.getQueueCheckPolling().setTimeout(Duration.ofMillis(150));
-        executor = new QueueCheckStepExecutor(exchangeQueuesPort, properties, new ObjectMapper());
+        executor = new QueueCheckStepExecutor(
+                exchangeQueuesPort, new ExchangeQueueProvisioner(exchangeQueuesPort), properties, new ObjectMapper());
     }
 
     @Test
@@ -144,13 +148,47 @@ class QueueCheckStepExecutorTest {
     }
 
     @Test
-    void throwsWhenQueueNotFound() {
+    void createsMissingQueueInsteadOfFailingImmediately() {
+        // get-or-create: DAG может быть собран так, что QUEUE_CHECK выполняется раньше
+        // соответствующего QUEUE-шага — тогда проверяем пустую, только что созданную очередь,
+        // а не падаем сразу с "не найдена".
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("missing"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "missing", null, 0, 0)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(0, List.of()));
+
+        ScenarioStep step = step(Map.of("queueName", "missing", "minTotalCount", 0));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
+
+        verify(exchangeQueuesPort).create(any());
+        assertThat(stepRun.getOrchestratorQueueId()).isEqualTo(queueId);
+    }
+
+    @Test
+    void throwsWhenQueueStillNotFoundAfterCreateAttempt() {
         when(exchangeQueuesPort.findByName("missing")).thenReturn(Optional.empty());
 
         ScenarioStep step = step(Map.of("queueName", "missing"));
         StepRun stepRun = new StepRun(1L, 2L);
 
         assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
+    }
+
+    @Test
+    void doesNotRecreateQueueThatAlreadyExists() {
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(new PageDto<>(0, List.of()));
+
+        ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 0));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
+
+        verify(exchangeQueuesPort, never()).create(any());
     }
 
     @Test

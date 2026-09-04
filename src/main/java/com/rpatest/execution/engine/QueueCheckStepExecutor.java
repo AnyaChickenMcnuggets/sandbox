@@ -36,12 +36,17 @@ public class QueueCheckStepExecutor implements StepExecutor {
     private static final int MAX_PAGES = 50;
 
     private final ExchangeQueuesPort exchangeQueuesPort;
+    private final ExchangeQueueProvisioner queueProvisioner;
     private final OrchestratorProperties properties;
     private final ObjectMapper objectMapper;
 
     public QueueCheckStepExecutor(
-            ExchangeQueuesPort exchangeQueuesPort, OrchestratorProperties properties, ObjectMapper objectMapper) {
+            ExchangeQueuesPort exchangeQueuesPort,
+            ExchangeQueueProvisioner queueProvisioner,
+            OrchestratorProperties properties,
+            ObjectMapper objectMapper) {
         this.exchangeQueuesPort = exchangeQueuesPort;
+        this.queueProvisioner = queueProvisioner;
         this.properties = properties;
         this.objectMapper = objectMapper;
     }
@@ -70,9 +75,10 @@ public class QueueCheckStepExecutor implements StepExecutor {
                 ? Duration.ofSeconds(config.timeoutSeconds()) : defaults.getTimeout();
 
         try {
-            ExchangeQueueDto queue = exchangeQueuesPort.findByName(queueName)
-                    .orElseThrow(() -> new StepExecutionException(
-                            "Очередь '" + queueName + "' не найдена в оркестраторе для проверки"));
+            // Get-or-create: если очередь ещё не создана предыдущим шагом (например, DAG собран
+            // с QUEUE_CHECK раньше соответствующего QUEUE), проверка не должна падать — просто
+            // ждём появления элементов в пустой (только что созданной) очереди до таймаута.
+            ExchangeQueueDto queue = queueProvisioner.ensureExists(queueName, null, null, null);
             stepRun.setOrchestratorQueueId(queue.id());
 
             pollUntilSatisfied(

@@ -12,16 +12,20 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.orchestrator.client.AssignmentsPort;
+import com.rpatest.orchestrator.client.RpaProjectQueuePort;
 import com.rpatest.orchestrator.client.RpaProjectVariablesPort;
 import com.rpatest.orchestrator.dto.AssignmentCreateDto;
 import com.rpatest.orchestrator.dto.AssignmentDto;
 import com.rpatest.orchestrator.dto.AssignmentStatus;
+import com.rpatest.orchestrator.dto.QueueItemProjectDto;
+import com.rpatest.orchestrator.dto.RpaProjectLaunchDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableDto;
 import com.rpatest.orchestrator.dto.RpaProjectVariableEditByIdDto;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.lang.reflect.Field;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +35,7 @@ class JobStepExecutorTest {
 
     private AssignmentsPort assignmentsPort;
     private RpaProjectVariablesPort rpaProjectVariablesPort;
+    private RpaProjectQueuePort rpaProjectQueuePort;
     private StatusPoller statusPoller;
     private JobStepExecutor executor;
 
@@ -38,8 +43,10 @@ class JobStepExecutorTest {
     void setUp() {
         assignmentsPort = mock(AssignmentsPort.class);
         rpaProjectVariablesPort = mock(RpaProjectVariablesPort.class);
+        rpaProjectQueuePort = mock(RpaProjectQueuePort.class);
         statusPoller = mock(StatusPoller.class);
-        executor = new JobStepExecutor(assignmentsPort, rpaProjectVariablesPort, statusPoller, new ObjectMapper());
+        executor = new JobStepExecutor(
+                assignmentsPort, rpaProjectVariablesPort, rpaProjectQueuePort, statusPoller, new ObjectMapper());
     }
 
     @Test
@@ -53,8 +60,7 @@ class JobStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "My_Job_10_5", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(42))
-                .thenReturn(new AssignmentDto(42, "My_Job_10_5", "My Job", 3, AssignmentStatus.COMPLETE, null, null, null));
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
@@ -70,8 +76,7 @@ class JobStepExecutorTest {
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
         when(rpaProjectVariablesPort.get(42)).thenReturn(List.of(new RpaProjectVariableDto(99, "x", "0")));
-        when(statusPoller.pollUntilTerminal(42))
-                .thenReturn(new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.COMPLETE, null, null, null));
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
@@ -85,8 +90,7 @@ class JobStepExecutorTest {
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
         when(rpaProjectVariablesPort.get(42)).thenReturn(List.of(new RpaProjectVariableDto(99, "x", "0")));
-        when(statusPoller.pollUntilTerminal(42))
-                .thenReturn(new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.COMPLETE, null, null, null));
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
@@ -94,17 +98,33 @@ class JobStepExecutorTest {
     }
 
     @Test
-    void throwsWhenAssignmentEndsInError() {
+    void throwsWhenLaunchEndsInFailure() {
         ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(42))
-                .thenReturn(new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.ERROR, null, null, "boom"));
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(failedLaunch(42, "robot-1"));
+        when(rpaProjectQueuePort.findByAssignment(42))
+                .thenReturn(List.of(new QueueItemProjectDto(1, 42, "boom", "robot-1", LocalDateTime.now(), LocalDateTime.now())));
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))
                 .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("robot-1")
                 .hasMessageContaining("boom");
+    }
+
+    @Test
+    void throwsWhenLaunchFailsEvenWithoutQueueErrorDetails() {
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
+        StepRun stepRun = new StepRun(10L, 5L);
+        AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(failedLaunch(42, "robot-1"));
+        when(rpaProjectQueuePort.findByAssignment(42)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("robot-1");
     }
 
     @Test
@@ -124,14 +144,23 @@ class JobStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "x", "y", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(42))
-                .thenReturn(new AssignmentDto(42, "x", "y", 3, AssignmentStatus.COMPLETE, null, null, null));
+        when(statusPoller.pollUntilTerminal(42)).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
         org.mockito.ArgumentCaptor<AssignmentCreateDto> captor = org.mockito.ArgumentCaptor.forClass(AssignmentCreateDto.class);
         verify(assignmentsPort).create(captor.capture());
         assertThat(captor.getValue().name()).matches("[A-Za-z0-9_]+");
+    }
+
+    private RpaProjectLaunchDto successfulLaunch(int assignmentId) {
+        LocalDateTime now = LocalDateTime.now();
+        return new RpaProjectLaunchDto(1, 3, 9, "robot-1", assignmentId, now, now, true, null, now);
+    }
+
+    private RpaProjectLaunchDto failedLaunch(int assignmentId, String robotName) {
+        LocalDateTime now = LocalDateTime.now();
+        return new RpaProjectLaunchDto(1, 3, 9, robotName, assignmentId, now, now, false, null, now);
     }
 
     private ScenarioStep step(Long id, String name, Map<String, Object> config) {
