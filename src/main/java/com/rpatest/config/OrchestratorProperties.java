@@ -11,6 +11,7 @@ public class OrchestratorProperties {
     private Credentials credentials = new Credentials();
     private Http http = new Http();
     private Polling polling = new Polling();
+    private Polling queueCheckPolling = new Polling(Duration.ofSeconds(5), Duration.ofMinutes(10));
     private Tls tls = new Tls();
 
     public String getBaseUrl() {
@@ -43,6 +44,14 @@ public class OrchestratorProperties {
 
     public void setPolling(Polling polling) {
         this.polling = polling;
+    }
+
+    public Polling getQueueCheckPolling() {
+        return queueCheckPolling;
+    }
+
+    public void setQueueCheckPolling(Polling queueCheckPolling) {
+        this.queueCheckPolling = queueCheckPolling;
     }
 
     public Tls getTls() {
@@ -98,6 +107,14 @@ public class OrchestratorProperties {
     public static class Polling {
         private Duration interval = Duration.ofSeconds(5);
         private Duration timeout = Duration.ofMinutes(30);
+
+        public Polling() {
+        }
+
+        public Polling(Duration interval, Duration timeout) {
+            this.interval = interval;
+            this.timeout = timeout;
+        }
 
         public Duration getInterval() {
             return interval;

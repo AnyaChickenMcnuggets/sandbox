@@ -12,6 +12,7 @@
 | Аргументы задания | `RpaProjectVariables` (`/Assignment/{id}`) | `JobStepConfig.arguments` |
 | Очередь транзакций | `ExchangeQueues` | `ScenarioStep(type=QUEUE)` → `StepRun.orchestratorQueueId` |
 | Транзакция очереди | `ExchangeQueueItem` / `ExchangeQueueValueDto` | `QueueStepConfig.transactions` / `QueueItemResult` |
+| Статус транзакции очереди | нет отдельного поля — выводится из `readedRobotAt`/`lastEventType` | `QueueItemDerivedStatus` (NEW/IN_PROGRESS/SUCCESS/ERROR/BUSINESS_ERROR) |
 | Аутентификация | `POST /api/Account` ({userName, password}) → `{token}` | `TokenProvider` |
 
 ## Слои
@@ -49,8 +50,9 @@ scenario_run 1───* step_run 1───* queue_item_result
 ```
 
 - `scenario_step.config` (JSONB) хранит специфичные для типа шага параметры: для `JOB` —
-  `rpaProjectId`, аргументы, количество роботов; для `QUEUE` — параметры очереди и список
-  транзакций-шаблонов.
+  `rpaProjectId`, аргументы; для `QUEUE` — параметры очереди и список транзакций-шаблонов; для
+  `QUEUE_CHECK` — имя проверяемой очереди, опциональный фильтр по `naturalKey` и ожидаемые
+  количества по статусу/минимальный общий счётчик (`QueueCheckStepConfig`).
 - `scenario_step_edge` реализует DAG: обычная цепочка — одно исходящее ребро на шаг; разветвление
   (fan-out) — несколько исходящих рёбер у одного шага (например, Job → Queue A + Queue B).
 - `step_run` хранит id созданных в оркестраторе сущностей (`orchestrator_assignment_id`,
@@ -62,15 +64,35 @@ scenario_run 1───* step_run 1───* queue_item_result
 1. `POST /api/v1/scenarios/{id}/run` создаёт `ScenarioRun(status=PENDING)` и асинхронно (`@Async`)
    запускает `ScenarioExecutionEngine.execute(run)`.
 2. Движок находит корневые шаги DAG (без входящих рёбер) и исполняет их через `StepExecutor`
-   (Strategy: `JobStepExecutor` / `QueueStepExecutor`).
+   (Strategy: `JobStepExecutor` / `QueueStepExecutor` / `QueueCheckStepExecutor`).
 3. `JobStepExecutor`: создаёт `Assignment` (`POST /api/Assignments/v2` — эндпоинт v1 без версии в
    swagger присутствует, но не актуален на реальном стенде), выставляет аргументы
    (`PUT /api/RpaProjectVariables/Assignment/{id}`), стартует (`PUT /api/Assignments/{id}/Start`),
    передаёт управление `StatusPoller`, который с заданным интервалом (`orchestrator.polling.
    interval`) опрашивает `GET /api/Assignments/v2/{id}` до терминального статуса
    (`Complete`/`Error`) либо таймаута.
+   **Важно:** `AssignmentStatus.COMPLETE` отражает только то, что оркестратор успешно поставил
+   проект в очередь на выполнение (`RpaProjectQueue`) — не то, что робот реально доделал работу.
+   Единственный надёжный способ узнать, что данные обработаны, — проверить транзакции очереди,
+   которую читает/пишет проект, поэтому фактическая проверка результата выносится в отдельный шаг
+   `QUEUE_CHECK` (см. п. 4а), а не встраивается в `JobStepExecutor`.
 4. `QueueStepExecutor`: создаёт `ExchangeQueue` (`POST /api/ExchangeQueues`), добавляет
-   транзакции-шаблоны (`PUT /api/ExchangeQueues/{id}/Items/Add`).
+   транзакции-шаблоны (`PUT /api/ExchangeQueues/{id}/Items/Add`) — используется и для входной
+   очереди (данные для задания) и для выходной (создаётся заранее, до старта задания, чтобы
+   заданию было куда писать; своих транзакций может не добавлять).
+4a. `QueueCheckStepExecutor` (тип шага `QUEUE_CHECK`): не создаёт очередь, а поллит уже
+   существующую (`GET /api/ExchangeQueues/{id}/Items`, постранично) до тех пор, пока фактические
+   количества элементов по производному статусу (`QueueItemDerivedStatus`, опционально
+   отфильтрованные по списку `naturalKey`) не совпадут с ожидаемыми из `config.expectedStatusCounts`
+   / `config.minTotalCount`, либо не истечёт `orchestrator.queue-check-polling.timeout`. Фильтр по
+   `naturalKeys` работает как точное совпадение по умолчанию (для входной очереди — мы сами знаем
+   точные ключи отправленных транзакций) либо как совпадение по префиксу при
+   `config.naturalKeyPrefixMatch=true` (для выходной очереди — базовый ключ сквозной от входа к
+   выходу, но на выходе к нему может дописываться суффикс для трассировки при разветвлении одной
+   входной транзакции на несколько выходных). Это и есть
+   автоматическая проверка результата — сценарий явно падает (`StepExecutionException` с текстом
+   "ожидалось X, фактически Y"), если распределение по статусам не совпало с ожиданиями автора
+   сценария. Обычно ставится сразу после `JOB`-шага, перед следующим `JOB`.
 5. По завершении шага движок находит исходящие рёбра и параллельно (`CompletableFuture.allOf`)
    запускает все дочерние шаги — это и есть поддержка "разветвления на две очереди после
    определённого задания".
@@ -119,8 +141,8 @@ scenario_run 1───* step_run 1───* queue_item_result
 |---|---|
 | `orchestrator.base-url` | базовый URL Primo RPA Orchestrator |
 | `orchestrator.credentials.username/password` | учётные данные (Jasypt `ENC(...)`) |
-| `orchestrator.credentials.robot-edition` | значение `robotEdition` в `LoginDto` |
 | `orchestrator.polling.interval` / `orchestrator.polling.timeout` | параметры опроса статуса Assignment |
+| `orchestrator.queue-check-polling.interval` / `.timeout` | параметры опроса очереди в `QUEUE_CHECK` (по умолчанию для шагов без своих `pollIntervalSeconds`/`timeoutSeconds`) |
 | `orchestrator.http.connect-timeout` / `read-timeout` | таймауты HTTP-клиента |
 | `orchestrator.tls.trusted-certificates` | пути к сертификатам CA оркестратора (`file:...`), если он за внутренним CA — иначе PKIX path building failed |
 | `resilience4j.retry.instances.orchestrator.*` | политика retry |

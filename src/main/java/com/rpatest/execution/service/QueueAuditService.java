@@ -45,14 +45,15 @@ public class QueueAuditService {
         }
 
         for (ExchangeQueueValueDto item : items) {
-            String status = item.lastEventType() == null ? "UNKNOWN" : item.lastEventType().name();
             queueItemResultRepository.save(new QueueItemResult(
-                    stepRun.getId(), item.id(), null, status, Map.of("value", String.valueOf(item.value()))));
+                    stepRun.getId(), item.id(), item.naturalKey(), item.derivedStatus().name(),
+                    Map.of("value", String.valueOf(item.value()))));
         }
 
         return items.stream()
                 .map(i -> new QueueItemResponse(
                         i.id(),
+                        i.naturalKey(),
                         i.value(),
                         i.createdAt(),
                         i.lastEventType() == null ? null : i.lastEventType().name(),

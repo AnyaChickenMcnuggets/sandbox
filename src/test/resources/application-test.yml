@@ -10,6 +10,9 @@ orchestrator:
   polling:
     interval: 50ms
     timeout: 5s
+  queue-check-polling:
+    interval: 50ms
+    timeout: 5s
 
 jasypt:
   encryptor:
