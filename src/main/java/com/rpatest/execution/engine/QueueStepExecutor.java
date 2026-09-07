@@ -53,10 +53,15 @@ public class QueueStepExecutor implements StepExecutor {
                 step.getName(), step.getId(), queueName, transactions.size());
         try {
             progressReporter.report(stepRun, "Ищу/создаю очередь '" + queueName + "'");
-            ExchangeQueueDto queue =
+            ExchangeQueueProvisioner.Result provisioned =
                     queueProvisioner.ensureExists(queueName, config.description(), config.ttl(), config.maxRetray());
+            ExchangeQueueDto queue = provisioned.queue();
             stepRun.setOrchestratorQueueId(queue.id());
-            log.info("Шаг '{}': очередь '{}' готова, id={}", step.getName(), queueName, queue.id());
+            // На cleanup можно удалять только очередь, которую реально создал этот прогон — если
+            // она уже существовала (переиспользована по имени), она не наша, чтобы её удалять.
+            stepRun.setOrchestratorQueueOwned(provisioned.created());
+            log.info("Шаг '{}': очередь '{}' {}, id={}", step.getName(), queueName,
+                    provisioned.created() ? "создана" : "уже существовала (переиспользована)", queue.id());
 
             int added = 0;
             for (TransactionTemplate transaction : transactions) {

@@ -39,8 +39,8 @@ class RunControllerTest {
 
     @Test
     void runReturnsAcceptedWithPendingRun() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, RunStatus.PENDING, null, null, List.of());
-        when(executionService.startRun(eq(5L), any())).thenReturn(response);
+        RunResponse response = new RunResponse(1L, 5L, RunStatus.PENDING, null, null, null, List.of());
+        when(executionService.startRun(eq(5L), any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isAccepted())
@@ -57,7 +57,7 @@ class RunControllerTest {
 
     @Test
     void stopReturnsStoppedRun() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, RunStatus.STOPPED, null, null, List.of());
+        RunResponse response = new RunResponse(1L, 5L, RunStatus.STOPPED, null, null, null, List.of());
         when(executionService.stopRun(1L)).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/runs/1/stop"))
@@ -67,7 +67,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsConflictWhenServiceReportsConflict() throws Exception {
-        when(executionService.startRun(eq(5L), any())).thenThrow(new ConflictException("уже выполняется"));
+        when(executionService.startRun(eq(5L), any(), any())).thenThrow(new ConflictException("уже выполняется"));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isConflict())
@@ -76,7 +76,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsBadGatewayOnOrchestratorApiError() throws Exception {
-        when(executionService.startRun(eq(5L), any())).thenThrow(new OrchestratorApiException("недоступен"));
+        when(executionService.startRun(eq(5L), any(), any())).thenThrow(new OrchestratorApiException("недоступен"));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isBadGateway())
@@ -85,7 +85,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsBadGatewayOnOrchestratorAuthError() throws Exception {
-        when(executionService.startRun(eq(5L), any())).thenThrow(new OrchestratorAuthException("неверные учётные данные"));
+        when(executionService.startRun(eq(5L), any(), any())).thenThrow(new OrchestratorAuthException("неверные учётные данные"));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isBadGateway())

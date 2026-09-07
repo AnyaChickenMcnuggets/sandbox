@@ -202,6 +202,47 @@ class ScenarioExecutionEngineTest {
         assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
     }
 
+    @Test
+    void startStepIdSkipsAncestorsAndBeginsTraversalAtThatStep() {
+        // queueIn -> job -> checkInput; запуск сразу с job не должен трогать queueIn
+        ScenarioStep queueIn = step(1L, ScenarioStepType.QUEUE, "queueIn");
+        ScenarioStep job = step(2L, ScenarioStepType.JOB, "job");
+        ScenarioStep checkInput = step(3L, ScenarioStepType.QUEUE_CHECK, "checkInput");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(queueIn, job, checkInput));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of(
+                new ScenarioStepEdge(1L, 2L), new ScenarioStepEdge(2L, 3L)));
+
+        StepExecutor succeedingExecutor = new RecordingExecutor(null);
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(succeedingExecutor,
+                        alsoSupports(succeedingExecutor, ScenarioStepType.QUEUE),
+                        alsoSupports(succeedingExecutor, ScenarioStepType.QUEUE_CHECK)),
+                Runnable::run);
+
+        engine.runScenario(10L, 2L);
+
+        assertThat(stepRunFor(1L).getStatus()).isEqualTo(RunStatus.PENDING);
+        assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(stepRunFor(3L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(run.getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+    }
+
+    @Test
+    void runFailsWhenStartStepIdNotFoundInScenario() {
+        ScenarioStep job = step(1L, ScenarioStepType.JOB, "job");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(job));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of());
+
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(new RecordingExecutor(null)), Runnable::run);
+
+        engine.runScenario(10L, 999L);
+
+        assertThat(run.getStatus()).isEqualTo(RunStatus.FAILED);
+    }
+
     private StepRun stepRunFor(Long stepId) {
         return savedStepRunsById.values().stream()
                 .filter(sr -> sr.getStepId().equals(stepId))

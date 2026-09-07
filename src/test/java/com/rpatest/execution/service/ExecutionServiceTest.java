@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
@@ -71,7 +72,40 @@ class ExecutionServiceTest {
 
         assertThat(response.id()).isEqualTo(100L);
         assertThat(response.status()).isEqualTo(RunStatus.PENDING);
-        verify(engine).runScenario(100L);
+        verify(engine).runScenario(100L, null);
+    }
+
+    @Test
+    void startRunWithStartStepIdValidatesOwnershipAndPassesItToEngine() {
+        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        ScenarioStep startStep = new ScenarioStep(1L, ScenarioStepType.JOB, "job", Map.of(), 2);
+        setId(startStep, 7L);
+        when(scenarioStepRepository.findById(7L)).thenReturn(Optional.of(startStep));
+        ScenarioRun run = run(100L, 1L);
+        when(runRepository.save(any())).thenReturn(run);
+
+        RunResponse response = service.startRun(1L, "tester", 7L);
+
+        assertThat(response.id()).isEqualTo(100L);
+        verify(engine).runScenario(100L, 7L);
+    }
+
+    @Test
+    void startRunThrowsWhenStartStepDoesNotBelongToScenario() {
+        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        ScenarioStep foreignStep = new ScenarioStep(999L, ScenarioStepType.JOB, "job", Map.of(), 0);
+        setId(foreignStep, 7L);
+        when(scenarioStepRepository.findById(7L)).thenReturn(Optional.of(foreignStep));
+
+        assertThatThrownBy(() -> service.startRun(1L, "tester", 7L)).isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    void startRunThrowsWhenStartStepMissing() {
+        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        when(scenarioStepRepository.findById(7L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.startRun(1L, "tester", 7L)).isInstanceOf(NotFoundException.class);
     }
 
     @Test

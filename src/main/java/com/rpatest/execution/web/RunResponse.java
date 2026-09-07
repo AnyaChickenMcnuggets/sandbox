@@ -10,5 +10,6 @@ public record RunResponse(
         RunStatus status,
         OffsetDateTime startedAt,
         OffsetDateTime finishedAt,
+        Long startStepId,
         List<StepRunResponse> steps) {
 }

@@ -35,6 +35,11 @@ public class StepRun {
     @Column(name = "orchestrator_queue_id")
     private UUID orchestratorQueueId;
 
+    /** Реально создана этим прогоном (а не переиспользована существовавшая) — только такую очередь
+     * можно удалять на cleanup, см. {@code ExchangeQueueProvisioner.Result}. */
+    @Column(name = "orchestrator_queue_owned", nullable = false)
+    private boolean orchestratorQueueOwned;
+
     @Column(name = "started_at")
     private OffsetDateTime startedAt;
 
@@ -91,6 +96,10 @@ public class StepRun {
         this.orchestratorQueueId = orchestratorQueueId;
     }
 
+    public void setOrchestratorQueueOwned(boolean orchestratorQueueOwned) {
+        this.orchestratorQueueOwned = orchestratorQueueOwned;
+    }
+
     public Long getId() {
         return id;
     }
@@ -113,6 +122,10 @@ public class StepRun {
 
     public UUID getOrchestratorQueueId() {
         return orchestratorQueueId;
+    }
+
+    public boolean isOrchestratorQueueOwned() {
+        return orchestratorQueueOwned;
     }
 
     public OffsetDateTime getStartedAt() {

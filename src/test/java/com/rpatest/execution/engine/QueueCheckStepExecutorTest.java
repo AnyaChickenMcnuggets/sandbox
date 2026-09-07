@@ -53,7 +53,7 @@ class QueueCheckStepExecutorTest {
     @Test
     void succeedsWhenExpectedStatusCountsMatch() {
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
                 item("k1", ExchangeQueueValueEventType.SUCCESS),
                 item("k2", ExchangeQueueValueEventType.ERROR))));
@@ -73,7 +73,7 @@ class QueueCheckStepExecutorTest {
         // удалённая транзакция (deletedAt != null) не должна влиять на исход проверки — иначе
         // ручное или автоматическое удаление элемента из очереди искажает результат
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
                 item("k1", ExchangeQueueValueEventType.SUCCESS),
                 deletedItem("k2", ExchangeQueueValueEventType.SUCCESS))));
@@ -89,7 +89,7 @@ class QueueCheckStepExecutorTest {
     @Test
     void filtersByNaturalKeysWhenProvided() {
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
                 item("tracked", ExchangeQueueValueEventType.SUCCESS),
                 item("ignored", ExchangeQueueValueEventType.ERROR))));
@@ -108,7 +108,7 @@ class QueueCheckStepExecutorTest {
         // один вход (naturalKey "tx-1") может породить несколько выходных транзакций с тем же
         // базовым ключом и дописанным суффиксом для трассировки: "tx-1-a", "tx-1-b"
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
                 item("tx-1-a", ExchangeQueueValueEventType.SUCCESS),
                 item("tx-1-b", ExchangeQueueValueEventType.SUCCESS),
@@ -128,7 +128,7 @@ class QueueCheckStepExecutorTest {
     void doesNotPrefixMatchWhenFlagIsAbsent() {
         // без naturalKeyPrefixMatch=true "tx-1" не должен матчить "tx-1-a" — точное совпадение
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
                 item("tx-1-a", ExchangeQueueValueEventType.SUCCESS))));
 
@@ -144,7 +144,7 @@ class QueueCheckStepExecutorTest {
     @Test
     void succeedsWhenMinTotalCountSatisfied() {
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
                 item("k1", null), item("k2", null), item("k3", null))));
 
@@ -157,7 +157,7 @@ class QueueCheckStepExecutorTest {
     @Test
     void throwsOnTimeoutWhenExpectationsNeverMet() {
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", null))));
 
         ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("SUCCESS", 5)));
@@ -176,7 +176,7 @@ class QueueCheckStepExecutorTest {
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("missing"))
                 .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "missing", null, 0, 0)));
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "missing", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(0, List.of()));
 
         ScenarioStep step = step(Map.of("queueName", "missing", "minTotalCount", 0));
@@ -201,7 +201,7 @@ class QueueCheckStepExecutorTest {
     @Test
     void doesNotRecreateQueueThatAlreadyExists() {
         UUID queueId = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(0, List.of()));
 
         ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 0));
@@ -210,6 +210,34 @@ class QueueCheckStepExecutorTest {
         executor.execute(stepRun, step);
 
         verify(exchangeQueuesPort, never()).create(any());
+    }
+
+    @Test
+    void errorNotYetExhaustingQueueRetryLimitIsNotCountedAsFinalError() {
+        // очередь допускает до 3 повторов при Error — оркестратор сам переложит транзакцию для
+        // повторной попытки, значит текущий Error ещё не финальный результат
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, 3)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
+                errorItem("k1", 1))));
+
+        ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("ERROR", 0)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
+    }
+
+    @Test
+    void errorAtOrBeyondQueueRetryLimitCountsAsFinalError() {
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, 3)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
+                errorItem("k1", 3))));
+
+        ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("ERROR", 1)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
     }
 
     @Test
@@ -223,11 +251,16 @@ class QueueCheckStepExecutorTest {
     }
 
     private ExchangeQueueValueDto item(String naturalKey, ExchangeQueueValueEventType eventType) {
-        return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, null, eventType, null);
+        return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, null, eventType, null, null);
     }
 
     private ExchangeQueueValueDto deletedItem(String naturalKey, ExchangeQueueValueEventType eventType) {
-        return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, LocalDateTime.now(), eventType, null);
+        return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, LocalDateTime.now(), eventType, null, null);
+    }
+
+    private ExchangeQueueValueDto errorItem(String naturalKey, int retray) {
+        return new ExchangeQueueValueDto(
+                UUID.randomUUID(), "v", naturalKey, null, null, null, ExchangeQueueValueEventType.ERROR, null, retray);
     }
 
     private ScenarioStep step(Map<String, Object> config) {

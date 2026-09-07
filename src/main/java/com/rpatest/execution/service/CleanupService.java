@@ -47,7 +47,10 @@ public class CleanupService {
                 deleteSafely(failures, "assignment " + step.getOrchestratorAssignmentId(),
                         () -> assignmentsPort.delete(step.getOrchestratorAssignmentId()));
             }
-            if (step.getOrchestratorQueueId() != null) {
+            // Удаляем только очередь, которую реально создал сам этот прогон (get-or-create мог
+            // переиспользовать уже существовавшую — её удалять нельзя, она не наша), и никогда —
+            // очередь QUEUE_CHECK-шага (он лишь проверяет/дожидается, но не владеет очередью).
+            if (step.getOrchestratorQueueId() != null && step.isOrchestratorQueueOwned()) {
                 deleteSafely(failures, "queue " + step.getOrchestratorQueueId(),
                         () -> exchangeQueuesPort.delete(step.getOrchestratorQueueId()));
             }

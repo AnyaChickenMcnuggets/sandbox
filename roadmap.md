@@ -209,6 +209,45 @@ Backend для автоматизации тестирования задани�
       (`ExecutionServiceTest`)
 - [x] 134 теста (было 132), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 17 — Владение очередью при cleanup, повторы Error, запуск с этапа — DONE
+Три замечания пользователя: (1) cleanup удалял очередь любого шага с `orchestratorQueueId`,
+включая переиспользованные (не созданные этим прогоном) и очереди `QUEUE_CHECK` — нужно удалять
+только реально созданные этим прогоном; (2) `QUEUE_CHECK` должен учитывать лимит повторов очереди
+при подсчёте `ERROR`-транзакций — Error, для которого повторы ещё не исчерпаны, не финальный
+результат; (3) нужна возможность запускать прогон с произвольного шага сценария, а не только с
+корня DAG целиком.
+- [x] `ExchangeQueueProvisioner.ensureExists` возвращает `Result(queue, created)` вместо голого DTO
+      — вызывающий теперь знает, была ли очередь реально создана или переиспользована
+- [x] `StepRun.orchestrator_queue_owned` (`V6__step_run_queue_owned.sql`) — `true` только когда
+      `QueueStepExecutor` сам создал очередь (`Result.created()`); `QueueCheckStepExecutor` никогда
+      не выставляет этот флаг, даже когда сам вызывает get-or-create
+- [x] `CleanupService.cleanupLastRun` удаляет очередь только при
+      `orchestratorQueueId != null && orchestratorQueueOwned` — Assignment по-прежнему удаляется
+      всегда (он и раньше создавался заново каждый прогон)
+- [x] `ExchangeQueueDto.maxRetray` и `ExchangeQueueValueDto.retray` — довешаны поля из ответа
+      оркестратора (были в swagger, но не мапились): лимит повторов очереди и текущее число
+      повторов конкретной транзакции
+- [x] `QueueCheckStepExecutor.effectiveStatus` — `ERROR` с `item.retray() < queue.maxRetray()`
+      считается `IN_PROGRESS`, а не `ERROR`, при подсчёте `expectedStatusCounts`/`minTotalCount`
+      (оркестратор ещё повторит попытку); `ERROR` с исчерпанными повторами по-прежнему `ERROR`
+- [x] `POST /api/v1/scenarios/{id}/run` принимает опциональный `startStepId` — прогон начинается с
+      указанного шага вместо корней DAG; шаги "до" него остаются `PENDING` (обход их не касается),
+      ответственность за то, что их предпосылки уже выполнены — на вызывающем.
+      `ScenarioRun.start_step_id` (`V7__scenario_run_start_step.sql`) сохраняет и возвращает в
+      `RunResponse`, с чего был запущен конкретный прогон
+- [x] `StepRunResponse.orchestratorQueueOwned` — фронт теперь видит, какие шаги реально владеют
+      своей очередью (будет удалена на cleanup), а какие нет
+- [x] Тесты: `doesNotDeleteQueueThatWasReusedRatherThanCreated`,
+      `doesNotDeleteQueueCreatedByQueueCheckStep` (`CleanupServiceTest`),
+      `errorNotYetExhaustingQueueRetryLimitIsNotCountedAsFinalError`,
+      `errorAtOrBeyondQueueRetryLimitCountsAsFinalError` (`QueueCheckStepExecutorTest`),
+      `startStepIdSkipsAncestorsAndBeginsTraversalAtThatStep`,
+      `runFailsWhenStartStepIdNotFoundInScenario` (`ScenarioExecutionEngineTest`),
+      `startRunWithStartStepIdValidatesOwnershipAndPassesItToEngine`,
+      `startRunThrowsWhenStartStepDoesNotBelongToScenario`,
+      `startRunThrowsWhenStartStepMissing` (`ExecutionServiceTest`)
+- [x] 142 теста (было 134), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
@@ -248,6 +287,14 @@ Backend для автоматизации тестирования задани�
   применим и здесь.
 - `ScenarioStepRepositoryIT` (Testcontainers) не запускался в этой сессии — в текущем окружении
   нет Docker. Прогнать в CI/локально с Docker перед мёржем.
+- **`retray`/`maxRetray` не подтверждены на реальном стенде.** Поля добавлены из схем
+  `orc_swagger.json` (`ExchangeQueueValueDto.retray`, `ExchangeQueueDto.maxRetray`) по описанию
+  ("количество повторных помещений элемента в очередь при фиксации статуса ошибка"), но, в отличие
+  от других найденных на этом стенде расхождений, ни разу не проверялись вживую — стоит прогнать
+  сценарий с реальной ошибкой в задании и настроенным `maxRetray > 0` и убедиться, что
+  `QUEUE_CHECK` действительно ждёт исчерпания повторов, а не считает `ERROR` финальным сразу же
+  (или наоборот — что `IN_PROGRESS` из-за этой логики не зависает вечно, если оркестратор на
+  самом деле не перекладывает транзакцию автоматически).
 - ~~В `TESTING.md` очередь-приёмник результата (`queueOut`) была потомком `job1`, хотя её текст
   утверждал обратное~~ — исправлено: правильная форма `queueIn → queueOut → job → checkInput →
   checkOutput` (обе очереди — предки задания). См. правило в `architecture.md`.

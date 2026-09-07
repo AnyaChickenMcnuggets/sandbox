@@ -1,5 +1,6 @@
 package com.rpatest.execution.service;
 
+import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
@@ -52,12 +53,33 @@ public class ExecutionService {
 
     @Transactional
     public RunResponse startRun(Long scenarioId, String triggeredBy) {
+        return startRun(scenarioId, triggeredBy, null);
+    }
+
+    /**
+     * @param startStepId если задан — прогон начинается с этого шага, а не с корней DAG (например,
+     *                    чтобы перезапустить только "зависший" JOB или повторить QUEUE_CHECK, не
+     *                    пересоздавая уже готовые предшествующие очереди/задания заново). Шаги
+     *                    "до" него по DAG обход не затронет — они останутся PENDING, ответственность
+     *                    за то, что их предпосылки (например, данные во входной очереди) уже
+     *                    выполнены, лежит на вызывающем.
+     */
+    @Transactional
+    public RunResponse startRun(Long scenarioId, String triggeredBy, Long startStepId) {
         if (!scenarioRepository.existsById(scenarioId)) {
             throw new NotFoundException("Сценарий не найден: " + scenarioId);
         }
-        ScenarioRun run = runRepository.save(new ScenarioRun(scenarioId, triggeredBy));
+        if (startStepId != null) {
+            ScenarioStep startStep = scenarioStepRepository.findById(startStepId)
+                    .orElseThrow(() -> new NotFoundException("Шаг " + startStepId + " не найден"));
+            if (!startStep.getScenarioId().equals(scenarioId)) {
+                throw new InvalidRequestException(
+                        "Шаг " + startStepId + " не принадлежит сценарию " + scenarioId);
+            }
+        }
+        ScenarioRun run = runRepository.save(new ScenarioRun(scenarioId, triggeredBy, startStepId));
         Long runId = run.getId();
-        executor.execute(() -> engine.runScenario(runId));
+        executor.execute(() -> engine.runScenario(runId, startStepId));
         return toResponse(run, List.of());
     }
 
@@ -119,9 +141,11 @@ public class ExecutionService {
                             s.getOrchestratorQueueId(),
                             s.getStartedAt(),
                             s.getFinishedAt(),
-                            s.getErrorMessage());
+                            s.getErrorMessage(),
+                            s.isOrchestratorQueueOwned());
                 })
                 .toList();
-        return new RunResponse(run.getId(), run.getScenarioId(), run.getStatus(), run.getStartedAt(), run.getFinishedAt(), stepResponses);
+        return new RunResponse(run.getId(), run.getScenarioId(), run.getStatus(), run.getStartedAt(),
+                run.getFinishedAt(), run.getStartStepId(), stepResponses);
     }
 }

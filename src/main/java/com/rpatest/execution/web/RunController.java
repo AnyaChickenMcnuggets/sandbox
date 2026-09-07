@@ -26,7 +26,9 @@ public class RunController {
     @PostMapping("/api/v1/scenarios/{scenarioId}/run")
     public ResponseEntity<RunResponse> run(@PathVariable Long scenarioId, @RequestBody(required = false) RunRequest request) {
         String triggeredBy = request != null ? request.triggeredBy() : null;
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(executionService.startRun(scenarioId, triggeredBy));
+        Long startStepId = request != null ? request.startStepId() : null;
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(executionService.startRun(scenarioId, triggeredBy, startStepId));
     }
 
     @GetMapping("/api/v1/runs/{runId}")

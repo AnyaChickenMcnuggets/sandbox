@@ -34,12 +34,22 @@ public class ScenarioRun {
     @Column(name = "triggered_by")
     private String triggeredBy;
 
+    /** Шаг, с которого начался обход DAG — null означает "с корней", как обычно. См.
+     * {@code ScenarioExecutionEngine.runScenario(Long, Long)}. */
+    @Column(name = "start_step_id")
+    private Long startStepId;
+
     protected ScenarioRun() {
     }
 
     public ScenarioRun(Long scenarioId, String triggeredBy) {
+        this(scenarioId, triggeredBy, null);
+    }
+
+    public ScenarioRun(Long scenarioId, String triggeredBy, Long startStepId) {
         this.scenarioId = scenarioId;
         this.triggeredBy = triggeredBy;
+        this.startStepId = startStepId;
         this.status = RunStatus.PENDING;
     }
 
@@ -75,5 +85,9 @@ public class ScenarioRun {
 
     public String getTriggeredBy() {
         return triggeredBy;
+    }
+
+    public Long getStartStepId() {
+        return startStepId;
     }
 }

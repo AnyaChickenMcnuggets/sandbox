@@ -52,7 +52,7 @@ class QueueStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         when(exchangeQueuesPort.findByName("my_queue"))
                 .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 0, 0)));
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 0, 0, null)));
 
         executor.execute(stepRun, step);
 
@@ -67,7 +67,7 @@ class QueueStepExecutorTest {
         ScenarioStep step = step("My Queue", Map.of("name", "my_queue"));
         StepRun stepRun = new StepRun(10L, 5L);
         when(exchangeQueuesPort.findByName("my_queue"))
-                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 3, 0)));
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 3, 0, null)));
 
         executor.execute(stepRun, step);
 
@@ -81,7 +81,7 @@ class QueueStepExecutorTest {
         ScenarioStep step = step("Queue", Map.of("name", "тест очередь"));
         StepRun stepRun = new StepRun(10L, 5L);
         when(exchangeQueuesPort.findByName("____________"))
-                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "____________", null, 0, 0)));
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "____________", null, 0, 0, null)));
 
         executor.execute(stepRun, step);
 
@@ -93,7 +93,7 @@ class QueueStepExecutorTest {
         UUID queueId = UUID.randomUUID();
         ScenarioStep step = step("Queue", Map.of("name", "q"));
         StepRun stepRun = new StepRun(10L, 5L);
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
 
         executor.execute(stepRun, step);
 

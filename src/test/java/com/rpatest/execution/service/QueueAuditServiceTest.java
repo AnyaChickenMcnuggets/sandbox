@@ -60,7 +60,7 @@ class QueueAuditServiceTest {
         stepRun.setOrchestratorQueueId(queueId);
         when(stepRunRepository.findByScenarioRunIdAndStepId(1L, 2L)).thenReturn(Optional.of(stepRun));
         ExchangeQueueValueDto item = new ExchangeQueueValueDto(
-                itemId, "value", "key-1", null, null, null, ExchangeQueueValueEventType.SUCCESS, "ok");
+                itemId, "value", "key-1", null, null, null, ExchangeQueueValueEventType.SUCCESS, "ok", null);
         when(exchangeQueuesPort.listItems(queueId, 0, 100)).thenReturn(ListResultDto.of(1, List.of(item)));
 
         List<QueueItemResponse> result = service.auditQueueItems(1L, 2L, 0, 100);

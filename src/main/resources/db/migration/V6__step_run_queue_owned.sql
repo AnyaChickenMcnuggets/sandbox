@@ -1,0 +1,1 @@
+ALTER TABLE step_run ADD COLUMN orchestrator_queue_owned BOOLEAN NOT NULL DEFAULT FALSE;

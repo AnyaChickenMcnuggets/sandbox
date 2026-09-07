@@ -16,5 +16,6 @@ public record StepRunResponse(
         UUID orchestratorQueueId,
         OffsetDateTime startedAt,
         OffsetDateTime finishedAt,
-        String errorMessage) {
+        String errorMessage,
+        boolean orchestratorQueueOwned) {
 }

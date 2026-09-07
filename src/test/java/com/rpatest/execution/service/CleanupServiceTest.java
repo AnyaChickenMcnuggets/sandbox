@@ -2,8 +2,10 @@ package com.rpatest.execution.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,7 +49,7 @@ class CleanupServiceTest {
     }
 
     @Test
-    void deletesAssignmentsAndQueuesFromLastRun() {
+    void deletesAssignmentsAndOwnedQueuesFromLastRun() {
         ScenarioRun run = run(100L, 1L);
         when(runRepository.findFirstByScenarioIdOrderByIdDesc(1L)).thenReturn(Optional.of(run));
         UUID queueId = UUID.randomUUID();
@@ -55,6 +57,7 @@ class CleanupServiceTest {
         jobStep.setOrchestratorAssignmentId(42);
         StepRun queueStep = new StepRun(100L, 2L);
         queueStep.setOrchestratorQueueId(queueId);
+        queueStep.setOrchestratorQueueOwned(true);
         when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of(jobStep, queueStep));
 
         List<String> failures = service.cleanupLastRun(1L);
@@ -62,6 +65,40 @@ class CleanupServiceTest {
         assertThat(failures).isEmpty();
         verify(assignmentsPort).delete(42);
         verify(exchangeQueuesPort).delete(queueId);
+    }
+
+    @Test
+    void doesNotDeleteQueueThatWasReusedRatherThanCreated() {
+        // QUEUE-шаг мог просто переиспользовать уже существовавшую очередь (get-or-create) — она
+        // не создана этим прогоном, cleanup не должен её трогать
+        ScenarioRun run = run(100L, 1L);
+        when(runRepository.findFirstByScenarioIdOrderByIdDesc(1L)).thenReturn(Optional.of(run));
+        UUID queueId = UUID.randomUUID();
+        StepRun reusedQueueStep = new StepRun(100L, 2L);
+        reusedQueueStep.setOrchestratorQueueId(queueId);
+        when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of(reusedQueueStep));
+
+        List<String> failures = service.cleanupLastRun(1L);
+
+        assertThat(failures).isEmpty();
+        verify(exchangeQueuesPort, never()).delete(any());
+    }
+
+    @Test
+    void doesNotDeleteQueueCreatedByQueueCheckStep() {
+        // QUEUE_CHECK никогда не "владеет" очередью, даже если её (get-or-create) он же и создал —
+        // это шаг проверки, а не создания, cleanup не должен удалять его очередь
+        ScenarioRun run = run(100L, 1L);
+        when(runRepository.findFirstByScenarioIdOrderByIdDesc(1L)).thenReturn(Optional.of(run));
+        UUID queueId = UUID.randomUUID();
+        StepRun checkStep = new StepRun(100L, 3L);
+        checkStep.setOrchestratorQueueId(queueId);
+        when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of(checkStep));
+
+        List<String> failures = service.cleanupLastRun(1L);
+
+        assertThat(failures).isEmpty();
+        verify(exchangeQueuesPort, never()).delete(any());
     }
 
     @Test

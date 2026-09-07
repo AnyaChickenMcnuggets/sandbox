@@ -7,6 +7,7 @@ import com.rpatest.execution.engine.config.QueueCheckStepConfig;
 import com.rpatest.orchestrator.client.ExchangeQueuesPort;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
+import com.rpatest.orchestrator.dto.QueueItemDerivedStatus;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.orchestrator.util.OrchestratorNames;
 import com.rpatest.scenario.domain.ScenarioStep;
@@ -90,13 +91,16 @@ public class QueueCheckStepExecutor implements StepExecutor {
             // Get-or-create: если очередь ещё не создана предыдущим шагом (например, DAG собран
             // с QUEUE_CHECK раньше соответствующего QUEUE), проверка не должна падать — просто
             // ждём появления элементов в пустой (только что созданной) очереди до таймаута.
-            ExchangeQueueDto queue = queueProvisioner.ensureExists(queueName, null, null, null);
+            ExchangeQueueDto queue = queueProvisioner.ensureExists(queueName, null, null, null).queue();
             stepRun.setOrchestratorQueueId(queue.id());
+            // QUEUE_CHECK никогда не владеет очередью для целей cleanup — он либо переиспользует,
+            // либо (get-or-create) создаёт пустую только чтобы было что поллить, но не "создаёт"
+            // её в смысле "это моя очередь, которую можно удалить после прогона".
             progressReporter.report(stepRun, "Очередь '" + queueName + "' (id=" + queue.id()
                     + ") найдена, начинаю проверку. Ожидается: " + describeExpectation(expected, minTotalCount));
 
-            pollUntilSatisfied(
-                    stepRun, queue.id(), queueName, naturalKeyFilter, prefixMatch, expected, minTotalCount, interval, timeout);
+            pollUntilSatisfied(stepRun, queue.id(), queueName, naturalKeyFilter, prefixMatch, expected, minTotalCount,
+                    queue.maxRetrayOrZero(), interval, timeout);
         } catch (OrchestratorApiException e) {
             log.error("Шаг '{}': ошибка вызова оркестратора при проверке очереди '{}'", step.getName(), queueName, e);
             throw new StepExecutionException("Не удалось выполнить проверку очереди '" + step.getName() + "'", e);
@@ -111,6 +115,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
             boolean prefixMatch,
             Map<String, Integer> expected,
             Integer minTotalCount,
+            int maxRetray,
             Duration interval,
             Duration timeout) {
         Instant deadline = Instant.now().plus(timeout);
@@ -120,7 +125,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
         while (true) {
             attempt++;
             List<ExchangeQueueValueDto> matching = fetchMatchingItems(queueId, naturalKeyFilter, prefixMatch);
-            actualCounts = countByStatus(matching);
+            actualCounts = countByStatus(matching, maxRetray);
             actualTotal = matching.size();
 
             String actualDescription = describeActual(actualCounts, actualTotal);
@@ -168,8 +173,25 @@ public class QueueCheckStepExecutor implements StepExecutor {
         return all.stream().filter(i -> i.naturalKey() != null && naturalKeyFilter.contains(i.naturalKey())).toList();
     }
 
-    private Map<String, Long> countByStatus(List<ExchangeQueueValueDto> items) {
-        return items.stream().collect(Collectors.groupingBy(i -> i.derivedStatus().name(), Collectors.counting()));
+    private Map<String, Long> countByStatus(List<ExchangeQueueValueDto> items, int maxRetray) {
+        return items.stream()
+                .collect(Collectors.groupingBy(i -> effectiveStatus(i, maxRetray).name(), Collectors.counting()));
+    }
+
+    /**
+     * Оркестратор при статусе Error автоматически перекладывает транзакцию обратно в очередь для
+     * повторной попытки, пока не исчерпан лимит повторов очереди ({@code ExchangeQueueDto.maxRetray}).
+     * Пока item.retray() < maxRetray, текущий Error — ещё не финальный результат: транзакцию
+     * возьмут в обработку снова, и статус может ещё смениться на Success. Считаем такую транзакцию
+     * как IN_PROGRESS (ожидает повтора), а не как ERROR — иначе QUEUE_CHECK может зафиксировать
+     * "ошибку", которую оркестратор через секунду сам исправит повторной попыткой.
+     */
+    private QueueItemDerivedStatus effectiveStatus(ExchangeQueueValueDto item, int maxRetray) {
+        QueueItemDerivedStatus status = item.derivedStatus();
+        if (status == QueueItemDerivedStatus.ERROR && item.retrayOrZero() < maxRetray) {
+            return QueueItemDerivedStatus.IN_PROGRESS;
+        }
+        return status;
     }
 
     private boolean satisfies(

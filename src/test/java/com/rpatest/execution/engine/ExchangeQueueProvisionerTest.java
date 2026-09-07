@@ -29,11 +29,12 @@ class ExchangeQueueProvisionerTest {
     @Test
     void returnsExistingQueueWithoutCreating() {
         UUID id = UUID.randomUUID();
-        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(id, "q", null, 0, 0)));
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(id, "q", null, 0, 0, null)));
 
-        ExchangeQueueDto result = provisioner.ensureExists("q", "desc", null, null);
+        ExchangeQueueProvisioner.Result result = provisioner.ensureExists("q", "desc", null, null);
 
-        assertThat(result.id()).isEqualTo(id);
+        assertThat(result.queue().id()).isEqualTo(id);
+        assertThat(result.created()).isFalse();
         verify(exchangeQueuesPort, never()).create(any());
     }
 
@@ -42,11 +43,12 @@ class ExchangeQueueProvisionerTest {
         UUID id = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q"))
                 .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(new ExchangeQueueDto(id, "q", null, 0, 0)));
+                .thenReturn(Optional.of(new ExchangeQueueDto(id, "q", null, 0, 0, null)));
 
-        ExchangeQueueDto result = provisioner.ensureExists("q", "desc", 60, 3);
+        ExchangeQueueProvisioner.Result result = provisioner.ensureExists("q", "desc", 60, 3);
 
-        assertThat(result.id()).isEqualTo(id);
+        assertThat(result.queue().id()).isEqualTo(id);
+        assertThat(result.created()).isTrue();
         verify(exchangeQueuesPort).create(any());
     }
 

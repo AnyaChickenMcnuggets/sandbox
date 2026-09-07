@@ -16,7 +16,12 @@ public record ExchangeQueueValueDto(
         LocalDateTime readedRobotAt,
         LocalDateTime deletedAt,
         ExchangeQueueValueEventType lastEventType,
-        String lastEventText) {
+        String lastEventText,
+        Integer retray) {
+
+    public int retrayOrZero() {
+        return retray == null ? 0 : retray;
+    }
 
     public QueueItemDerivedStatus derivedStatus() {
         if (lastEventType != null) {

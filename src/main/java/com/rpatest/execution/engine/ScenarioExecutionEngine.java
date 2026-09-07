@@ -53,6 +53,16 @@ public class ScenarioExecutionEngine {
     }
 
     public void runScenario(Long runId) {
+        runScenario(runId, null);
+    }
+
+    /**
+     * @param startStepId если задан — обход DAG начинается с этого шага (единственный "корень" для
+     *                    данного прогона) вместо обычных корней сценария. Шаги, до которых обход не
+     *                    дойдёт, остаются {@code PENDING} — так же, как шаги, пропущенные из-за
+     *                    падения предка (см. {@code runStep}).
+     */
+    public void runScenario(Long runId, Long startStepId) {
         ScenarioRun run = runRepository.findById(runId)
                 .orElseThrow(() -> new StepExecutionException("ScenarioRun не найден: " + runId));
         run.markRunning();
@@ -80,7 +90,19 @@ public class ScenarioExecutionEngine {
                 hasIncoming.add(edge.getToStepId());
             }
 
-            List<ScenarioStep> roots = steps.stream().filter(s -> !hasIncoming.contains(s.getId())).toList();
+            List<ScenarioStep> roots;
+            if (startStepId != null) {
+                ScenarioStep startStep = stepsById.get(startStepId);
+                if (startStep == null) {
+                    throw new StepExecutionException(
+                            "Шаг " + startStepId + " не найден в сценарии " + run.getScenarioId());
+                }
+                roots = List.of(startStep);
+                log.info("Прогон {}: запуск начат вручную с шага '{}' (id={}), а не с корня DAG",
+                        runId, startStep.getName(), startStepId);
+            } else {
+                roots = steps.stream().filter(s -> !hasIncoming.contains(s.getId())).toList();
+            }
             log.info("Прогон {}: {} шаг(ов) всего, {} корневых: {}", runId, steps.size(), roots.size(),
                     roots.stream().map(ScenarioStep::getName).toList());
 
