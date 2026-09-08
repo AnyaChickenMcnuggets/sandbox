@@ -1,5 +1,6 @@
 package com.rpatest.execution.domain;
 
+import com.rpatest.scenario.domain.ScenarioStepType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -22,8 +23,21 @@ public class StepRun {
     @Column(name = "scenario_run_id", nullable = false)
     private Long scenarioRunId;
 
-    @Column(name = "step_id", nullable = false)
+    /** Nullable: {@code scenario_step} мог быть удалён (удаление/редактирование сценария) без
+     * потери истории самого прогона — см. {@code stepName}/{@code stepType} ниже. */
+    @Column(name = "step_id")
     private Long stepId;
+
+    /** Денормализованные имя/тип шага на момент запуска (тот же подход, что и
+     * {@code ScenarioRun.scenarioName}) — {@code scenario_step} может быть удалён позже
+     * (удаление сценария, либо PUT .../scenarios/{id} пересоздаёт шаги заново), а история
+     * прогона должна остаться читаемой. */
+    @Column(name = "step_name")
+    private String stepName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "step_type")
+    private ScenarioStepType stepType;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -62,8 +76,14 @@ public class StepRun {
     }
 
     public StepRun(Long scenarioRunId, Long stepId) {
+        this(scenarioRunId, stepId, null, null);
+    }
+
+    public StepRun(Long scenarioRunId, Long stepId, String stepName, ScenarioStepType stepType) {
         this.scenarioRunId = scenarioRunId;
         this.stepId = stepId;
+        this.stepName = stepName;
+        this.stepType = stepType;
         this.status = RunStatus.PENDING;
     }
 
@@ -110,6 +130,14 @@ public class StepRun {
 
     public Long getStepId() {
         return stepId;
+    }
+
+    public String getStepName() {
+        return stepName;
+    }
+
+    public ScenarioStepType getStepType() {
+        return stepType;
     }
 
     public RunStatus getStatus() {

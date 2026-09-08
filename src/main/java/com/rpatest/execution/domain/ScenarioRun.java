@@ -21,6 +21,12 @@ public class ScenarioRun {
     @Column(name = "scenario_id", nullable = false)
     private Long scenarioId;
 
+    /** Денормализованное имя сценария на момент запуска — сохраняется независимо от того, жив ли
+     * ещё сам сценарий, чтобы история прогонов не теряла название при удалении сценария (тот же
+     * подход, что у {@code StepRunResponse.stepName} для шагов, см. {@code ExecutionService}). */
+    @Column(name = "scenario_name")
+    private String scenarioName;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RunStatus status;
@@ -43,13 +49,18 @@ public class ScenarioRun {
     }
 
     public ScenarioRun(Long scenarioId, String triggeredBy) {
-        this(scenarioId, triggeredBy, null);
+        this(scenarioId, triggeredBy, null, null);
     }
 
     public ScenarioRun(Long scenarioId, String triggeredBy, Long startStepId) {
+        this(scenarioId, triggeredBy, startStepId, null);
+    }
+
+    public ScenarioRun(Long scenarioId, String triggeredBy, Long startStepId, String scenarioName) {
         this.scenarioId = scenarioId;
         this.triggeredBy = triggeredBy;
         this.startStepId = startStepId;
+        this.scenarioName = scenarioName;
         this.status = RunStatus.PENDING;
     }
 
@@ -69,6 +80,10 @@ public class ScenarioRun {
 
     public Long getScenarioId() {
         return scenarioId;
+    }
+
+    public String getScenarioName() {
+        return scenarioName;
     }
 
     public RunStatus getStatus() {

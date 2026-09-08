@@ -111,6 +111,25 @@ class ScenarioExecutionEngineTest {
     }
 
     @Test
+    void preCreatedStepRunsCarryDenormalizedStepNameAndType() {
+        // имя/тип шага записываются на StepRun сразу при пре-создании (PENDING), а не только когда
+        // движок реально дошёл до шага — переживает последующее удаление/пересоздание scenario_step
+        ScenarioStep job = step(1L, ScenarioStepType.JOB, "My Job");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(job));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of());
+
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(new RecordingExecutor(null)), Runnable::run);
+
+        engine.runScenario(10L);
+
+        StepRun stepRun = stepRunFor(1L);
+        assertThat(stepRun.getStepName()).isEqualTo("My Job");
+        assertThat(stepRun.getStepType()).isEqualTo(ScenarioStepType.JOB);
+    }
+
+    @Test
     void skipsChildStepsWhenParentFails() {
         ScenarioStep job = step(1L, ScenarioStepType.JOB, "job");
         ScenarioStep queueA = step(2L, ScenarioStepType.QUEUE, "queueA");

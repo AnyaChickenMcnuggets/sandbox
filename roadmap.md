@@ -248,6 +248,40 @@ Backend для автоматизации тестирования задани�
       `startRunThrowsWhenStartStepMissing` (`ExecutionServiceTest`)
 - [x] 142 теста (было 134), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 18 — История прогонов переживает удаление сценария — DONE
+Пользователь: на экране мониторинга фронт показывает название сценария, а `RunResponse` содержит
+только `scenarioId` — приходится догружать отдельным `GET /api/v1/scenarios/{scenarioId}` (лишний
+запрос, "мерцание" загрузки), и если сценарий с тех пор удалён, показать для старого прогона нечего.
+Запросил денормализованное `scenarioName` в `RunResponse`, по аналогии с тем, как (по его
+ожиданию) уже должен работать `stepName` в `StepRunResponse`.
+
+При реализации выяснилось: `scenario_run.scenario_id` и `step_run.step_id` в схеме были `ON DELETE
+CASCADE` — удаление сценария и без всякого нового поля уже стирало ВСЮ историю его прогонов из БД
+целиком (не только имя), а `PUT /scenarios/{id}` (пересоздаёт `scenario_step` с нуля) стирал
+`step_run` каждого предыдущего прогона того же сценария. То есть "прогон переживает удаление
+сценария" было невозможно даже с денормализованным именем — самого прогона просто не оставалось.
+Уточнил у пользователя — подтверждено: убрать `CASCADE`, сохранять историю прогонов.
+- [x] `scenario_run.scenario_id`: `ON DELETE CASCADE` → `ON DELETE SET NULL`, столбец nullable
+- [x] `step_run.step_id`: `ON DELETE CASCADE` → `ON DELETE SET NULL`, столбец nullable (иначе
+      `scenario_run` пережил бы удаление, но со `steps: []` — сценарий и без того уже отдельно
+      удаляет+пересоздаёт свои `scenario_step` на каждый `PUT`)
+- [x] `scenario_run.scenario_name` (денормализация `TestScenario.name`, заполняется в
+      `ExecutionService.startRun` в момент создания рана) — `RunResponse.scenarioName`
+- [x] `step_run.step_name`/`step_type` (денормализация `ScenarioStep.name`/`type`, заполняется в
+      `ScenarioExecutionEngine` при пре-создании `StepRun(PENDING)`) — `StepRunResponse.stepName`/
+      `stepType` теперь читают эти денормализованные поля вместо live-join с `scenario_step`,
+      который для удалённого шага вернул бы `null`
+- [x] `ExecutionService.toResponse`: join с `scenario_step` оставлен только для сортировки по
+      `position` (не для имени/типа); `findAllById` фильтрует `null` из `stepId` перед вызовом
+      (иначе падает на orphaned `step_run`)
+- [x] Миграция `V9__preserve_run_history_on_scenario_deletion.sql` — снимает `CASCADE`, добавляет
+      `step_name`/`step_type`, задним числом бэкфиллит `scenario_name`/`step_name`/`step_type` для
+      уже существующих строк, пока связанные `test_scenario`/`scenario_step` ещё живы
+- [x] Тесты: `startRunSavesScenarioNameDenormalizedOnTheRun`, `getRunReturnsDenormalizedScenarioName`,
+      `getRunUsesDenormalizedStepNameAndTypeWhenScenarioStepNoLongerExists` (`ExecutionServiceTest`),
+      `preCreatedStepRunsCarryDenormalizedStepNameAndType` (`ScenarioExecutionEngineTest`)
+- [x] 146 тестов (было 142), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
@@ -287,6 +321,13 @@ Backend для автоматизации тестирования задани�
   применим и здесь.
 - `ScenarioStepRepositoryIT` (Testcontainers) не запускался в этой сессии — в текущем окружении
   нет Docker. Прогнать в CI/локально с Docker перед мёржем.
+- **`V9__preserve_run_history_on_scenario_deletion.sql` не прогонялась на реальной БД** (нет
+  Docker в этой сессии, см. выше) — `DROP CONSTRAINT scenario_run_scenario_id_fkey`/`..._step_id_fkey`
+  предполагает автосгенерированное имя ограничения Postgres (`<table>_<column>_fkey`, как оно
+  называется при неименованном inline `REFERENCES` в `CREATE TABLE`, см. `V2__scenario.sql`/
+  `V3__execution.sql`) — стоит явно проверить перед мёржем на реальной БД (`\d scenario_run` /
+  `\d step_run` в psql), что имена ограничений действительно такие, иначе миграция упадёт с
+  "constraint does not exist".
 - **`retray`/`maxRetray` не подтверждены на реальном стенде.** Поля добавлены из схем
   `orc_swagger.json` (`ExchangeQueueValueDto.retray`, `ExchangeQueueDto.maxRetray`) по описанию
   ("количество повторных помещений элемента в очередь при фиксации статуса ошибка"), но, в отличие

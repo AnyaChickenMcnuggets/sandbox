@@ -449,6 +449,37 @@ curl -s -X POST http://localhost:8080/api/v1/scenarios/$SCENARIO_ID/run \
 - `startStepId`, не существующий вообще → `404 NOT_FOUND`.
 - `startStepId` шага из **другого** сценария → `400 INVALID_REQUEST`.
 
+## 12. История прогона переживает удаление/редактирование сценария
+
+```bash
+curl -s http://localhost:8080/api/v1/runs/$RUN_ID
+```
+Ответ теперь содержит `"scenarioName"` (имя сценария на момент запуска) рядом с `scenarioId`, а у
+каждого шага в `steps[]` — `stepName`/`stepType`, как и раньше, но теперь это значения,
+сохранённые в момент запуска, а не «живые» (посмотренные в текущей БД).
+
+Проверка денормализации:
+```bash
+curl -s -X PUT http://localhost:8080/api/v1/scenarios/$SCENARIO_ID \
+  -H "Content-Type: application/json" \
+  -d '{"name":"full-flow-test-RENAMED", ...}'   # тот же steps[], только name поменяли
+curl -s http://localhost:8080/api/v1/runs/$RUN_ID
+```
+`scenarioName` в ответе должен остаться прежним (именем на момент запуска), а не смениться на
+`"full-flow-test-RENAMED"` — это и есть денормализация, а не подгрузка вживую.
+
+Проверка "прогон переживает удаление сценария":
+```bash
+curl -s -X DELETE http://localhost:8080/api/v1/scenarios/$SCENARIO_ID -w "\n%{http_code}\n"
+curl -s http://localhost:8080/api/v1/runs/$RUN_ID
+```
+Ожидается: `DELETE` — `204`; последующий `GET /api/v1/runs/$RUN_ID` всё ещё возвращает `200` с
+полным телом (`scenarioName`, все `steps[]` со своими `stepName`/`stepType`/статусами/`detail`) —
+прогон не пропал вместе со сценарием. (До Sprint 18 такой `GET` вернул бы `404` — сценарий и вся
+его история прогонов удалялись каскадно одним запросом.) `POST
+/api/v1/scenarios/$SCENARIO_ID/cleanup` и повторный `POST .../scenarios/$SCENARIO_ID/run` для
+удалённого сценария по-прежнему должны давать `404` — это ожидаемо, они требуют живого сценария.
+
 ## Чек-лист результата
 
 - [ ] CRUD сценария работает (create/get/list/update/delete), защита от циклов — 400
@@ -482,3 +513,7 @@ curl -s -X POST http://localhost:8080/api/v1/scenarios/$SCENARIO_ID/run \
       финальной ошибкой в `QUEUE_CHECK` — раздел 10
 - [ ] Запуск с `startStepId` пропускает шаги "до" него (остаются `PENDING`) и стартует прямо с
       указанного шага; `startStepId` из другого сценария/несуществующий — `400`/`404` — раздел 11
+- [ ] `RunResponse.scenarioName` и `StepRunResponse.stepName`/`stepType` — денормализованные
+      значения на момент запуска (не меняются, если сценарий/шаг потом переименовали); `GET
+      /api/v1/runs/{runId}` продолжает работать (`200`, с полным телом) даже после удаления
+      сценария, к которому этот прогон относился — раздел 12

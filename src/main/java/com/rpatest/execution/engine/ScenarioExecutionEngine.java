@@ -78,7 +78,9 @@ public class ScenarioExecutionEngine {
             // шаги, до которых обход ещё не дошёл (например, QUEUE_CHECK после ещё выполняющегося
             // JOB), просто отсутствуют в GET /api/v1/runs/{runId} вместо того чтобы быть видны как
             // "ещё не начался", и по ответу нельзя понять всю топологию прогона заранее.
-            stepRunRepository.saveAll(steps.stream().map(s -> new StepRun(runId, s.getId())).toList());
+            stepRunRepository.saveAll(steps.stream()
+                    .map(s -> new StepRun(runId, s.getId(), s.getName(), s.getType()))
+                    .toList());
 
             List<Long> stepIds = steps.stream().map(ScenarioStep::getId).toList();
             List<ScenarioStepEdge> edges = stepIds.isEmpty() ? List.of() : edgeRepository.findByStepIds(stepIds);
@@ -154,7 +156,7 @@ public class ScenarioExecutionEngine {
 
     private RunStatus runStep(ScenarioRun run, ScenarioStep step) {
         StepRun stepRun = stepRunRepository.findByScenarioRunIdAndStepId(run.getId(), step.getId())
-                .orElseGet(() -> new StepRun(run.getId(), step.getId()));
+                .orElseGet(() -> new StepRun(run.getId(), step.getId(), step.getName(), step.getType()));
         stepRun.markRunning();
         stepRun = stepRunRepository.save(stepRun);
         log.info("Прогон {}: шаг '{}' (id={}, тип={}) начат", run.getId(), step.getName(), step.getId(), step.getType());

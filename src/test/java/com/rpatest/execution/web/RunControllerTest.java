@@ -39,13 +39,14 @@ class RunControllerTest {
 
     @Test
     void runReturnsAcceptedWithPendingRun() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, RunStatus.PENDING, null, null, null, List.of());
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.PENDING, null, null, null, List.of());
         when(executionService.startRun(eq(5L), any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.scenarioName").value("Test Scenario"));
     }
 
     @Test
@@ -57,7 +58,7 @@ class RunControllerTest {
 
     @Test
     void stopReturnsStoppedRun() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, RunStatus.STOPPED, null, null, null, List.of());
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.STOPPED, null, null, null, List.of());
         when(executionService.stopRun(1L)).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/runs/1/stop"))

@@ -60,6 +60,21 @@ scenario_run 1───* step_run 1───* queue_item_result
 - `step_run` хранит id созданных в оркестраторе сущностей (`orchestrator_assignment_id`,
   `orchestrator_queue_id`), чтобы `cleanup` мог их удалить, а повторный запуск сценария не зависел
   от них (каждый прогон создаёт новые Assignment/ExchangeQueue).
+- **История прогонов переживает удаление/редактирование сценария.** `scenario_run.scenario_id` и
+  `step_run.step_id` — `ON DELETE SET NULL` (не `CASCADE`, как было изначально), оба столбца
+  nullable. Удаление сценария (`DELETE /api/v1/scenarios/{id}`) и редактирование
+  (`PUT .../scenarios/{id}` — пересоздаёт `scenario_step` с нуля, старые id пропадают) больше не
+  стирают `scenario_run`/`step_run` целиком — они просто теряют связь с уже несуществующим
+  `scenario_step`/`test_scenario`. Чтобы после этого было что показать, имя и тип денормализованы
+  на момент создания: `scenario_run.scenario_name` (из `TestScenario.name`) и
+  `step_run.step_name`/`step_type` (из `ScenarioStep.name`/`type`) — заполняются один раз в момент
+  запуска (`ScenarioExecutionEngine`/`ExecutionService.startRun`), а не вычисляются на лету join'ом.
+  `RunResponse.scenarioName`/`StepRunResponse.stepName`/`stepType` отдают именно эти
+  денормализованные значения — не требуют отдельного `GET /api/v1/scenarios/{id}` на фронте и не
+  становятся `null`, если сценарий/шаг с тех пор удалён. `ExecutionService.toResponse` всё ещё
+  делает join с `scenario_step` (`findAllById`), но только для сортировки `steps[]` по
+  `ScenarioStep.position` — если шаг уже удалён, он просто сортируется последним
+  (`Integer.MAX_VALUE`), это не мешает отобразить сам шаг.
 
 ## Выполнение сценария
 

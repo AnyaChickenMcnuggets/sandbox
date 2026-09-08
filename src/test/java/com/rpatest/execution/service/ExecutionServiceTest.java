@@ -22,6 +22,7 @@ import com.rpatest.execution.web.StepRunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
+import com.rpatest.scenario.domain.TestScenario;
 import com.rpatest.scenario.repository.ScenarioStepRepository;
 import com.rpatest.scenario.repository.TestScenarioRepository;
 import java.util.Map;
@@ -31,6 +32,7 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class ExecutionServiceTest {
 
@@ -57,14 +59,14 @@ class ExecutionServiceTest {
 
     @Test
     void startRunThrowsWhenScenarioMissing() {
-        when(scenarioRepository.existsById(1L)).thenReturn(false);
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.startRun(1L, "tester")).isInstanceOf(NotFoundException.class);
     }
 
     @Test
     void startRunPersistsRunAndSubmitsExecution() {
-        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
         ScenarioRun run = run(100L, 1L);
         when(runRepository.save(any())).thenReturn(run);
 
@@ -76,8 +78,22 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void startRunSavesScenarioNameDenormalizedOnTheRun() {
+        // имя сценария сохраняется на StepRun в момент запуска — история прогонов не должна
+        // зависеть от отдельного GET .../scenarios/{id} и должна пережить удаление сценария
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(runRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.startRun(1L, "tester");
+
+        ArgumentCaptor<ScenarioRun> captor = ArgumentCaptor.forClass(ScenarioRun.class);
+        verify(runRepository).save(captor.capture());
+        assertThat(captor.getValue().getScenarioName()).isEqualTo("My Scenario");
+    }
+
+    @Test
     void startRunWithStartStepIdValidatesOwnershipAndPassesItToEngine() {
-        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
         ScenarioStep startStep = new ScenarioStep(1L, ScenarioStepType.JOB, "job", Map.of(), 2);
         setId(startStep, 7L);
         when(scenarioStepRepository.findById(7L)).thenReturn(Optional.of(startStep));
@@ -92,7 +108,7 @@ class ExecutionServiceTest {
 
     @Test
     void startRunThrowsWhenStartStepDoesNotBelongToScenario() {
-        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
         ScenarioStep foreignStep = new ScenarioStep(999L, ScenarioStepType.JOB, "job", Map.of(), 0);
         setId(foreignStep, 7L);
         when(scenarioStepRepository.findById(7L)).thenReturn(Optional.of(foreignStep));
@@ -102,7 +118,7 @@ class ExecutionServiceTest {
 
     @Test
     void startRunThrowsWhenStartStepMissing() {
-        when(scenarioRepository.existsById(1L)).thenReturn(true);
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
         when(scenarioStepRepository.findById(7L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.startRun(1L, "tester", 7L)).isInstanceOf(NotFoundException.class);
@@ -126,6 +142,37 @@ class ExecutionServiceTest {
 
         assertThat(response.steps()).hasSize(1);
         assertThat(response.steps().get(0).stepId()).isEqualTo(5L);
+    }
+
+    @Test
+    void getRunReturnsDenormalizedScenarioName() {
+        ScenarioRun run = new ScenarioRun(1L, "tester", null, "My Scenario");
+        setId(run, 100L);
+        when(runRepository.findById(100L)).thenReturn(Optional.of(run));
+        when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of());
+
+        RunResponse response = service.getRun(100L);
+
+        assertThat(response.scenarioName()).isEqualTo("My Scenario");
+    }
+
+    @Test
+    void getRunUsesDenormalizedStepNameAndTypeWhenScenarioStepNoLongerExists() {
+        // после удаления/пересоздания scenario_step (см. V9-миграция) step_id у старого StepRun
+        // становится null — имя/тип шага должны при этом браться из самого StepRun, а не из
+        // live-join, который в этом случае ничего не найдёт
+        ScenarioRun run = run(100L, 1L);
+        when(runRepository.findById(100L)).thenReturn(Optional.of(run));
+        StepRun orphanedStep = new StepRun(100L, 5L, "Old Step Name", ScenarioStepType.JOB);
+        setStepIdToNull(orphanedStep);
+        when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of(orphanedStep));
+
+        RunResponse response = service.getRun(100L);
+
+        StepRunResponse stepResponse = response.steps().get(0);
+        assertThat(stepResponse.stepId()).isNull();
+        assertThat(stepResponse.stepName()).isEqualTo("Old Step Name");
+        assertThat(stepResponse.stepType()).isEqualTo(ScenarioStepType.JOB);
     }
 
     @Test
@@ -185,6 +232,20 @@ class ExecutionServiceTest {
         ScenarioRun run = new ScenarioRun(scenarioId, "tester");
         setId(run, id);
         return run;
+    }
+
+    private TestScenario scenario(String name) {
+        return new TestScenario(name, null);
+    }
+
+    private void setStepIdToNull(StepRun stepRun) {
+        try {
+            Field field = StepRun.class.getDeclaredField("stepId");
+            field.setAccessible(true);
+            field.set(stepRun, null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private void setId(Object entity, Long id) {
