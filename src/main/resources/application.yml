@@ -35,6 +35,9 @@ orchestrator:
   queue-check-polling:
     interval: 5s
     timeout: 10m
+  # Минимум свободных (Idle) роботов на оркестраторе, при котором POST .../run вообще стартует
+  # прогон — иначе 409 CONFLICT, не имеет смысла ставить задание в очередь заведомо без роботов.
+  min-free-robots: ${ORCHESTRATOR_MIN_FREE_ROBOTS:2}
   # orchestrator.tls.trusted-certificates: сертификаты CA оркестратора, если он поднят за
   # внутренним/самоподписанным CA (иначе PKIX path building failed при HTTPS-подключении).
   # Не задан по умолчанию (используется системный truststore JDK как есть). Задаётся через env:

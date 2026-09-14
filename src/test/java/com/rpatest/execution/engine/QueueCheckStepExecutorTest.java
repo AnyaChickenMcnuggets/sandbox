@@ -88,11 +88,13 @@ class QueueCheckStepExecutorTest {
 
     @Test
     void filtersByNaturalKeysWhenProvided() {
+        // непустой naturalKeys — поиск идёт по фильтру оркестратора (NaturalKey/NaturalKeyPart),
+        // а не постраничным перебором всей очереди, поэтому мок отвечает именно на вызов с
+        // фильтром, а не на "голый" listItems(queueId, page, size)
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
-                item("tracked", ExchangeQueueValueEventType.SUCCESS),
-                item("ignored", ExchangeQueueValueEventType.ERROR))));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "tracked", false)).thenReturn(
+                ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("tracked", ExchangeQueueValueEventType.SUCCESS))));
 
         ScenarioStep step = step(Map.of(
                 "queueName", "q",
@@ -106,10 +108,13 @@ class QueueCheckStepExecutorTest {
     @Test
     void matchesNaturalKeyByPrefixWhenEnabled() {
         // один вход (naturalKey "tx-1") может породить несколько выходных транзакций с тем же
-        // базовым ключом и дописанным суффиксом для трассировки: "tx-1-a", "tx-1-b"
+        // базовым ключом и дописанным суффиксом для трассировки: "tx-1-a", "tx-1-b". Мок также
+        // возвращает заведомо непредназначенный "tx-2-a" — проверяем, что финальный точный
+        // client-side re-check (startsWith) сам отсекает лишнее, даже если бы фильтр оркестратора
+        // оказался мягче ожидаемого (документации на точную семантику NaturalKeyPart нет).
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "tx-1", true)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
                 item("tx-1-a", ExchangeQueueValueEventType.SUCCESS),
                 item("tx-1-b", ExchangeQueueValueEventType.SUCCESS),
                 item("tx-2-a", ExchangeQueueValueEventType.SUCCESS))));
@@ -126,10 +131,11 @@ class QueueCheckStepExecutorTest {
 
     @Test
     void doesNotPrefixMatchWhenFlagIsAbsent() {
-        // без naturalKeyPrefixMatch=true "tx-1" не должен матчить "tx-1-a" — точное совпадение
+        // без naturalKeyPrefixMatch=true "tx-1" не должен матчить "tx-1-a" — точное совпадение,
+        // даже если сервер (мок здесь заведомо "мягкий") вернул частичное совпадение
         UUID queueId = UUID.randomUUID();
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
-        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "tx-1", false)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
                 item("tx-1-a", ExchangeQueueValueEventType.SUCCESS))));
 
         ScenarioStep step = step(Map.of(
@@ -139,6 +145,30 @@ class QueueCheckStepExecutorTest {
         StepRun stepRun = new StepRun(1L, 2L);
 
         assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
+    }
+
+    @Test
+    void queriesEachNaturalKeySeparatelyWhenMultipleProvided() {
+        // несколько ожидаемых ключей — отдельный отфильтрованный запрос на каждый, а не один
+        // "выгрузить всё и отфильтровать локально" (та самая жалоба — тысячи транзакций в очереди
+        // при поиске нескольких конкретных ключей)
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "k1", false)).thenReturn(
+                ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", ExchangeQueueValueEventType.SUCCESS))));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "k2", false)).thenReturn(
+                ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k2", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of(
+                "queueName", "q",
+                "naturalKeys", List.of("k1", "k2"),
+                "expectedStatusCounts", Map.of("SUCCESS", 2)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
+
+        verify(exchangeQueuesPort).listItems(queueId, 0, 200, "k1", false);
+        verify(exchangeQueuesPort).listItems(queueId, 0, 200, "k2", false);
     }
 
     @Test

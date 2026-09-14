@@ -21,5 +21,18 @@ public interface ExchangeQueuesPort {
 
     ListResultDto<ExchangeQueueValueDto> listItems(UUID queueId, int pageNumber, int pageSize);
 
+    /**
+     * Тот же список, но с фильтрацией по natural key на стороне оркестратора (параметры
+     * {@code NaturalKey}/{@code NaturalKeyPart} эндпоинта {@code GET .../v2/{id}/Items}) — не
+     * тянуть тысячи элементов очереди целиком ради поиска нескольких известных ключей.
+     *
+     * @param naturalKeyPart {@code false} — точное совпадение, {@code true} — по части ключа
+     *                       (используется для наших prefix-совпадений; финальная точная проверка
+     *                       всё равно остаётся на вызывающей стороне, см. {@code
+     *                       QueueCheckStepExecutor})
+     */
+    ListResultDto<ExchangeQueueValueDto> listItems(
+            UUID queueId, int pageNumber, int pageSize, String naturalKey, boolean naturalKeyPart);
+
     void delete(UUID queueId);
 }

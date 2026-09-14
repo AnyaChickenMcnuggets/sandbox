@@ -71,4 +71,25 @@ class RpaProjectsClientTest {
 
         assertThat(client.findByName("missing")).isEmpty();
     }
+
+    @Test
+    void findByIdLocatesProjectFromList() {
+        wireMockServer.stubFor(get(urlEqualTo("/api/RpaProjects/v3/short"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [{"id":1,"name":"Project A","description":null,"parentId":null,"active":true}]""")));
+
+        Optional<RpaProjectShortDto> result = client.findById(1);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("Project A");
+    }
+
+    @Test
+    void findByIdReturnsEmptyWhenNoMatch() {
+        wireMockServer.stubFor(get(urlEqualTo("/api/RpaProjects/v3/short"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody("[]")));
+
+        assertThat(client.findById(999)).isEmpty();
+    }
 }

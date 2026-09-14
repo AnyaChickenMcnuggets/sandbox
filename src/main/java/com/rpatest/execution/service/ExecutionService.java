@@ -1,16 +1,21 @@
 package com.rpatest.execution.service;
 
+import com.rpatest.common.exception.ConflictException;
 import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
+import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.engine.ScenarioExecutionEngine;
 import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
+import com.rpatest.execution.web.RobotAvailabilityResponse;
 import com.rpatest.execution.web.RunResponse;
 import com.rpatest.execution.web.StepRunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
+import com.rpatest.orchestrator.client.RobotsPort;
+import com.rpatest.orchestrator.dto.RobotDto;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.TestScenario;
 import com.rpatest.scenario.repository.ScenarioStepRepository;
@@ -34,6 +39,8 @@ public class ExecutionService {
     private final ScenarioStepRepository scenarioStepRepository;
     private final ScenarioExecutionEngine engine;
     private final AssignmentsPort assignmentsPort;
+    private final RobotsPort robotsPort;
+    private final OrchestratorProperties orchestratorProperties;
     private final Executor executor;
 
     public ExecutionService(
@@ -43,6 +50,8 @@ public class ExecutionService {
             ScenarioStepRepository scenarioStepRepository,
             ScenarioExecutionEngine engine,
             AssignmentsPort assignmentsPort,
+            RobotsPort robotsPort,
+            OrchestratorProperties orchestratorProperties,
             @Qualifier("scenarioExecutionExecutor") Executor executor) {
         this.scenarioRepository = scenarioRepository;
         this.runRepository = runRepository;
@@ -50,12 +59,29 @@ public class ExecutionService {
         this.scenarioStepRepository = scenarioStepRepository;
         this.engine = engine;
         this.assignmentsPort = assignmentsPort;
+        this.robotsPort = robotsPort;
+        this.orchestratorProperties = orchestratorProperties;
         this.executor = executor;
     }
 
     @Transactional
     public RunResponse startRun(Long scenarioId, String triggeredBy) {
         return startRun(scenarioId, triggeredBy, null);
+    }
+
+    /**
+     * Снимок доступности роботов для поллинга фронтом — то же самое условие, которое
+     * {@link #requireEnoughFreeRobots()} проверяет непосредственно перед запуском, но без побочных
+     * эффектов и без исключения: фронт может опрашивать это постоянно, чтобы держать кнопку
+     * "Запустить" в актуальном заблокированном/разблокированном состоянии, не дожидаясь попытки
+     * запуска и её возможного {@code 409}.
+     */
+    @Transactional(readOnly = true)
+    public RobotAvailabilityResponse getRobotAvailability() {
+        List<RobotDto> robots = robotsPort.list();
+        long free = robots.stream().filter(RobotDto::isFree).count();
+        int required = orchestratorProperties.getMinFreeRobots();
+        return new RobotAvailabilityResponse((int) free, robots.size(), required, free >= required);
     }
 
     /**
@@ -70,6 +96,7 @@ public class ExecutionService {
     public RunResponse startRun(Long scenarioId, String triggeredBy, Long startStepId) {
         TestScenario scenario = scenarioRepository.findById(scenarioId)
                 .orElseThrow(() -> new NotFoundException("Сценарий не найден: " + scenarioId));
+        requireEnoughFreeRobots();
         if (startStepId != null) {
             ScenarioStep startStep = scenarioStepRepository.findById(startStepId)
                     .orElseThrow(() -> new NotFoundException("Шаг " + startStepId + " не найден"));
@@ -110,6 +137,23 @@ public class ExecutionService {
         run.finish(RunStatus.STOPPED);
         runRepository.save(run);
         return toResponse(run, stepRunRepository.findByScenarioRunId(runId));
+    }
+
+    /**
+     * Не позволяет ставить прогон в очередь, если на оркестраторе заведомо некому его исполнять —
+     * иначе {@code JOB}-шаг просто зависает в {@code RpaProjectQueue} в ожидании робота (см.
+     * {@code StatusPoller}), и об этом узнают только по таймауту через полчаса. Порог настраивается
+     * ({@code orchestrator.min-free-robots}, по умолчанию 2) — проверяется независимо от того,
+     * есть ли в самом сценарии/точке возобновления (см. {@code startStepId}) хотя бы один JOB-шаг:
+     * это осознанно простой блок, а не анализ конкретной топологии DAG.
+     */
+    private void requireEnoughFreeRobots() {
+        RobotAvailabilityResponse availability = getRobotAvailability();
+        if (!availability.launchAllowed()) {
+            throw new ConflictException("Недостаточно свободных роботов на оркестраторе для запуска: "
+                    + "свободно " + availability.freeRobots() + " из " + availability.totalRobots()
+                    + ", требуется минимум " + availability.minFreeRobots() + ". Попробуйте запустить сценарий позже.");
+        }
     }
 
     private ScenarioRun findRunOrThrow(Long runId) {

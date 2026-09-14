@@ -32,14 +32,30 @@ public class QueueAuditService {
 
     @Transactional
     public List<QueueItemResponse> auditQueueItems(Long runId, Long stepId, int pageNumber, int pageSize) {
+        return auditQueueItems(runId, stepId, pageNumber, pageSize, null, false);
+    }
+
+    /**
+     * @param naturalKey если задан — поиск идёт по фильтру оркестратора ({@code NaturalKey}/
+     *                   {@code NaturalKeyPart} у {@code GET .../v2/{id}/Items}), а не постраничным
+     *                   перебором всей очереди: в очереди могут быть тысячи транзакций, из которых
+     *                   интересны единицы известных ключей.
+     * @param naturalKeyPart {@code false} — точное совпадение ключа, {@code true} — по префиксу
+     */
+    @Transactional
+    public List<QueueItemResponse> auditQueueItems(
+            Long runId, Long stepId, int pageNumber, int pageSize, String naturalKey, boolean naturalKeyPart) {
         var stepRun = stepRunRepository.findByScenarioRunIdAndStepId(runId, stepId)
                 .orElseThrow(() -> new NotFoundException("StepRun не найден для run=" + runId + ", step=" + stepId));
         if (stepRun.getOrchestratorQueueId() == null) {
             throw new InvalidRequestException("Шаг " + stepId + " не создавал очередь в оркестраторе");
         }
 
-        List<ExchangeQueueValueDto> items =
-                exchangeQueuesPort.listItems(stepRun.getOrchestratorQueueId(), pageNumber, pageSize).result();
+        List<ExchangeQueueValueDto> items = (naturalKey == null || naturalKey.isBlank()
+                ? exchangeQueuesPort.listItems(stepRun.getOrchestratorQueueId(), pageNumber, pageSize)
+                : exchangeQueuesPort.listItems(
+                        stepRun.getOrchestratorQueueId(), pageNumber, pageSize, naturalKey, naturalKeyPart))
+                .result();
         if (items == null) {
             items = List.of();
         }

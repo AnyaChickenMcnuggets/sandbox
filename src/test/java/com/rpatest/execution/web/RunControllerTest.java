@@ -17,6 +17,7 @@ import com.rpatest.execution.service.QueueAuditService;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.orchestrator.exception.OrchestratorAuthException;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -82,6 +83,19 @@ class RunControllerTest {
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("ORCHESTRATOR_API_ERROR"));
+    }
+
+    @Test
+    void queueItemsPassesNaturalKeyFilterThrough() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        QueueItemResponse item = new QueueItemResponse(itemId, "tx-1", "value", null, "SUCCESS", "ok");
+        when(queueAuditService.auditQueueItems(1L, 2L, 0, 100, "tx-1", true)).thenReturn(List.of(item));
+
+        mockMvc.perform(get("/api/v1/runs/1/steps/2/queue-items")
+                        .param("naturalKey", "tx-1")
+                        .param("naturalKeyPart", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].naturalKey").value("tx-1"));
     }
 
     @Test

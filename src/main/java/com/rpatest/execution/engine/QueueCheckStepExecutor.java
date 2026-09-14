@@ -146,9 +146,51 @@ public class QueueCheckStepExecutor implements StepExecutor {
     }
 
     private List<ExchangeQueueValueDto> fetchMatchingItems(UUID queueId, Set<String> naturalKeyFilter, boolean prefixMatch) {
+        List<ExchangeQueueValueDto> all = naturalKeyFilter.isEmpty()
+                ? fetchAllPages(queueId, null, false)
+                : fetchByNaturalKeys(queueId, naturalKeyFilter, prefixMatch);
+        // Удалённые транзакции (deletedAt != null) не должны влиять на исход проверки — иначе
+        // удаление элемента из очереди (вручную или самим оркестратором) искажает и общее число
+        // элементов, и распределение по статусам, которое сравнивается с ожиданием сценария.
+        all = all.stream().filter(i -> i.deletedAt() == null).toList();
+        if (naturalKeyFilter.isEmpty()) {
+            return all;
+        }
+        // Сервер уже отфильтровал по каждому ключу (NaturalKey/NaturalKeyPart), но точную
+        // семантику "начинается с" для prefix-режима перепроверяем сами — не задокументировано,
+        // что NaturalKeyPart на стороне оркестратора означает именно префикс, а не вхождение где
+        // угодно в строке, а наш контракт (см. тесты) — строго префикс.
+        if (prefixMatch) {
+            return all.stream()
+                    .filter(i -> i.naturalKey() != null
+                            && naturalKeyFilter.stream().anyMatch(prefix -> i.naturalKey().startsWith(prefix)))
+                    .toList();
+        }
+        return all.stream().filter(i -> i.naturalKey() != null && naturalKeyFilter.contains(i.naturalKey())).toList();
+    }
+
+    /**
+     * Один запрос на naturalKey (с фильтрацией на стороне оркестратора, см.
+     * {@code ExchangeQueuesPort.listItems(..., naturalKey, naturalKeyPart)}), вместо постраничного
+     * перебора всей очереди целиком: очередь может содержать тысячи транзакций, а нас интересуют
+     * только несколько конкретных ключей — раньше это не только тянуло лишние тысячи элементов,
+     * но и могло вовсе не найти искомую транзакцию, если она попадала за пределы {@code MAX_PAGES}
+     * постраничного перебора.
+     */
+    private List<ExchangeQueueValueDto> fetchByNaturalKeys(UUID queueId, Set<String> naturalKeyFilter, boolean prefixMatch) {
+        List<ExchangeQueueValueDto> result = new ArrayList<>();
+        for (String naturalKey : naturalKeyFilter) {
+            result.addAll(fetchAllPages(queueId, naturalKey, prefixMatch));
+        }
+        return result;
+    }
+
+    private List<ExchangeQueueValueDto> fetchAllPages(UUID queueId, String naturalKey, boolean naturalKeyPart) {
         List<ExchangeQueueValueDto> all = new ArrayList<>();
         for (int page = 0; page < MAX_PAGES; page++) {
-            List<ExchangeQueueValueDto> items = exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE).result();
+            List<ExchangeQueueValueDto> items = naturalKey == null
+                    ? exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE).result()
+                    : exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE, naturalKey, naturalKeyPart).result();
             if (items == null || items.isEmpty()) {
                 break;
             }
@@ -157,20 +199,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
                 break;
             }
         }
-        // Удалённые транзакции (deletedAt != null) не должны влиять на исход проверки — иначе
-        // удаление элемента из очереди (вручную или самим оркестратором) искажает и общее число
-        // элементов, и распределение по статусам, которое сравнивается с ожиданием сценария.
-        all = all.stream().filter(i -> i.deletedAt() == null).toList();
-        if (naturalKeyFilter.isEmpty()) {
-            return all;
-        }
-        if (prefixMatch) {
-            return all.stream()
-                    .filter(i -> i.naturalKey() != null
-                            && naturalKeyFilter.stream().anyMatch(prefix -> i.naturalKey().startsWith(prefix)))
-                    .toList();
-        }
-        return all.stream().filter(i -> i.naturalKey() != null && naturalKeyFilter.contains(i.naturalKey())).toList();
+        return all;
     }
 
     private Map<String, Long> countByStatus(List<ExchangeQueueValueDto> items, int maxRetray) {

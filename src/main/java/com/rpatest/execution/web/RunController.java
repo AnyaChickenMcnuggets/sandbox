@@ -46,7 +46,9 @@ public class RunController {
             @PathVariable Long runId,
             @PathVariable Long stepId,
             @RequestParam(defaultValue = "0") int pageNumber,
-            @RequestParam(defaultValue = "100") int pageSize) {
-        return queueAuditService.auditQueueItems(runId, stepId, pageNumber, pageSize);
+            @RequestParam(defaultValue = "100") int pageSize,
+            @RequestParam(required = false) String naturalKey,
+            @RequestParam(defaultValue = "false") boolean naturalKeyPart) {
+        return queueAuditService.auditQueueItems(runId, stepId, pageNumber, pageSize, naturalKey, naturalKeyPart);
     }
 }

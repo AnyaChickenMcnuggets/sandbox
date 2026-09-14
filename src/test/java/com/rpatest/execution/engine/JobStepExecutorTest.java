@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -67,13 +68,45 @@ class JobStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "My_Job_10_5", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(successfulLaunch(42));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
         assertThat(stepRun.getOrchestratorAssignmentId()).isEqualTo(42);
         verify(assignmentsPort).start(42);
         verify(rpaProjectVariablesPort, never()).get(anyInt());
+    }
+
+    @Test
+    void resolvesProjectLabelByIdForDisplayWhenOnlyIdConfigured() {
+        // rpaProjectId без rpaProjectName — по-прежнему резолвим человекочитаемое имя проекта
+        // отдельным запросом, чтобы статусы прогона показывали имя, а не голый id
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(rpaProjectsPort.findById(3)).thenReturn(Optional.of(new RpaProjectShortDto(3, "Sandbox Task", null, null, true)));
+        AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
+
+        executor.execute(stepRun, step);
+
+        verify(rpaProjectsPort).findById(3);
+    }
+
+    @Test
+    void succeedsEvenWhenProjectLabelLookupByIdFindsNothing() {
+        // резолвинг имени по id — только для отображения; если оркестратор не смог его найти
+        // (например, id не резолвится по какой-то причине), шаг всё равно должен выполниться
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(rpaProjectsPort.findById(3)).thenReturn(Optional.empty());
+        AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
+
+        executor.execute(stepRun, step);
+
+        assertThat(stepRun.getOrchestratorAssignmentId()).isEqualTo(42);
     }
 
     @Test
@@ -84,13 +117,28 @@ class JobStepExecutorTest {
                 .thenReturn(Optional.of(new RpaProjectShortDto(7, "Invoice Processor", null, null, true)));
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 7, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(successfulLaunch(42));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
         org.mockito.ArgumentCaptor<AssignmentCreateDto> captor = org.mockito.ArgumentCaptor.forClass(AssignmentCreateDto.class);
         verify(assignmentsPort).create(captor.capture());
         assertThat(captor.getValue().rpaProjectId()).isEqualTo(7);
+    }
+
+    @Test
+    void passesSanitizedAssignmentNameAsLabelToStatusPoller() {
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
+        StepRun stepRun = new StepRun(10L, 5L);
+        AssignmentDto created = new AssignmentDto(42, "My_Job_10_5", "My Job", 3, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
+
+        executor.execute(stepRun, step);
+
+        org.mockito.ArgumentCaptor<String> labelCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(statusPoller).pollUntilTerminal(eq(stepRun), eq(42), labelCaptor.capture());
+        assertThat(labelCaptor.getValue()).isEqualTo("My_Job_10_5");
     }
 
     @Test
@@ -119,7 +167,7 @@ class JobStepExecutorTest {
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
         when(rpaProjectVariablesPort.get(42)).thenReturn(List.of(new RpaProjectVariableDto(99, "x", "0")));
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(successfulLaunch(42));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
@@ -133,7 +181,7 @@ class JobStepExecutorTest {
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
         when(rpaProjectVariablesPort.get(42)).thenReturn(List.of(new RpaProjectVariableDto(99, "x", "0")));
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(successfulLaunch(42));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 
@@ -146,7 +194,7 @@ class JobStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(failedLaunch(42, "robot-1"));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(failedLaunch(42, "robot-1"));
         when(rpaProjectQueuePort.findByAssignment(42))
                 .thenReturn(List.of(new QueueItemProjectDto(1, 42, "boom", "robot-1", LocalDateTime.now(), LocalDateTime.now())));
 
@@ -162,7 +210,7 @@ class JobStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "job", "My Job", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(failedLaunch(42, "robot-1"));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(failedLaunch(42, "robot-1"));
         when(rpaProjectQueuePort.findByAssignment(42)).thenReturn(List.of());
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))
@@ -187,7 +235,7 @@ class JobStepExecutorTest {
         StepRun stepRun = new StepRun(10L, 5L);
         AssignmentDto created = new AssignmentDto(42, "x", "y", 3, AssignmentStatus.NEW, null, null, null);
         when(assignmentsPort.create(any())).thenReturn(created);
-        when(statusPoller.pollUntilTerminal(stepRun, 42)).thenReturn(successfulLaunch(42));
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any())).thenReturn(successfulLaunch(42));
 
         executor.execute(stepRun, step);
 

@@ -282,6 +282,83 @@ CASCADE` — удаление сценария и без всякого ново
       `preCreatedStepRunsCarryDenormalizedStepNameAndType` (`ScenarioExecutionEngineTest`)
 - [x] 146 тестов (было 142), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 19 — Поиск транзакций по фильтру, имена вместо id в статусах — DONE
+Пользователь: (1) при проверке очереди по `naturalKeys` тянется вся очередь целиком (тысячи
+транзакций) вместо поиска по фильтру, и из-за этого проверка иногда не находит существующую
+транзакцию — заподозрил, что оркестратор отдаёт только начало списка; (2) то же самое нужно и для
+ручного аудита при указанных id; (3) статусы запущенного сценария показывают голые numeric id
+оркестратора (`"Задание id=1447 ..."`) вместо человекочитаемых имён — непонятно, о чём речь.
+Расследование п.1 подтвердило гипотезу пользователя: постраничный перебор `QueueCheckStepExecutor`
+был ограничен `MAX_PAGES=50` (×200 = 10 000 элементов) — транзакция за этой границей была
+недостижима вообще, не только "неэффективно искалась". В `orc_swagger.json` (не в `OrcService.java`/
+`orc_worker.py`) нашёлся нужный, ранее не использованный фильтр эндпоинта.
+- [x] `ExchangeQueuesPort`/`ExchangeQueuesClient.listItems` — новая перегрузка с параметрами
+      `naturalKey`/`naturalKeyPart`, транслируется в query-параметры оркестратора `NaturalKey`/
+      `NaturalKeyPart` эндпоинта `GET .../v2/{id}/Items` (есть в схеме, нигде не задокументированы)
+- [x] `QueueCheckStepExecutor.fetchByNaturalKeys` — при непустом `naturalKeys` конфига делает
+      отдельный отфильтрованный запрос на каждый ключ вместо перебора всей очереди; финальная
+      точная проверка (`startsWith`/равенство) остаётся клиентской стороной — семантика
+      `NaturalKeyPart` на стороне оркестратора не подтверждена, подстраховка не помешает
+- [x] `QueueAuditService.auditQueueItems`/`RunController.queueItems` — тот же фильтр доступен и в
+      ручном аудите (`GET .../queue-items?naturalKey=...&naturalKeyPart=...`), опционально
+- [x] `JobStepExecutor`/`StatusPoller` — все статусные сообщения (`detail`, таймаут-эксепшены)
+      используют человекочитаемое имя задания (сгенерированное `assignmentName`,
+      `_<runId>_<stepId>`) вместо `"id=" + assignmentId`; `StatusPoller.pollUntilTerminal` получил
+      третий параметр `assignmentLabel`
+- [x] `RpaProjectsPort`/`RpaProjectsClient.findById` — резолвит имя проекта для отображения даже
+      когда шаг сконфигурирован через `rpaProjectId` (не `rpaProjectName`); best-effort, не роняет
+      шаг при неудаче
+- [x] Тесты: `listItemsWithNaturalKeyFiltersOnTheOrchestratorSide` (`ExchangeQueuesClientTest`),
+      `findByIdLocatesProjectFromList`/`findByIdReturnsEmptyWhenNoMatch` (`RpaProjectsClientTest`),
+      `queriesEachNaturalKeySeparatelyWhenMultipleProvided` + обновлённые prefix/exact-match тесты
+      (`QueueCheckStepExecutorTest`), `filtersByNaturalKeyOnTheOrchestratorSideWhenProvided`
+      (`QueueAuditServiceTest`), `queueItemsPassesNaturalKeyFilterThrough` (`RunControllerTest`),
+      `resolvesProjectLabelByIdForDisplayWhenOnlyIdConfigured`,
+      `succeedsEvenWhenProjectLabelLookupByIdFindsNothing`,
+      `passesSanitizedAssignmentNameAsLabelToStatusPoller` (`JobStepExecutorTest`),
+      `reportsAssignmentByLabelNotRawIdOnCompletion` (`StatusPollerTest`)
+- [x] 156 тестов (было 146), `mvn verify` (JaCoCo) — зелёный
+
+## Sprint 20 — Блок запуска при нехватке свободных роботов — DONE
+Пользователь: если на оркестраторе свободно меньше двух роботов, запуск сценария нужно блокировать
+заранее, а не давать `JOB`-шагу зависнуть в очереди на полчаса до собственного таймаута.
+- [x] `RobotDto`/`RobotRunStatus` — новые DTO, `status` mirrors `LTools.Enums.RunStatus`
+      (`Unavailable`/`Idle`/`Running`); `RobotDto.isFree()` — `status == IDLE`
+- [x] `RobotsPort`/`RobotsClient.list()` — `GET /api/Robots/v2` (тот же вызов, что и в эталонном
+      `OrcService.getRpaRobots`), без пагинации (реальные стенды не настолько велики)
+- [x] `OrchestratorProperties.minFreeRobots` (по умолчанию 2, `orchestrator.min-free-robots` в
+      `application.yml`) — порог настраиваемый, не захардкожен
+- [x] `ExecutionService.requireEnoughFreeRobots` — вызывается в начале `startRun`, до создания
+      `ScenarioRun`; при нехватке — `ConflictException` (`409`, текст "свободно N из M, требуется
+      минимум K"), прогон вообще не создаётся (не тратим место в истории на заведомо
+      незапустившийся прогон)
+- [x] Простая проверка, не анализирует DAG сценария — блокирует запуск любого прогона (в том числе
+      с `startStepId`, даже если точка возобновления не содержит `JOB`-шагов вовсе); осознанное
+      упрощение, см. "Открытые риски"
+- [x] Тесты: `listReturnsRobotsWithStatusFromV2Endpoint`/`listReturnsEmptyWhenResultIsNull`/
+      `wrapsServerErrorIntoOrchestratorApiException` (`RobotsClientTest`),
+      `startRunThrowsConflictWhenFewerThanMinFreeRobots`,
+      `startRunSucceedsWhenExactlyMinFreeRobotsAvailable`,
+      `startRunAllowsCustomMinFreeRobotsThreshold` (`ExecutionServiceTest`)
+- [x] 162 теста (было 156), `mvn verify` (JaCoCo) — зелёный
+
+## Sprint 21 — Поллинг доступности роботов для фронта — DONE
+Пользователь: хочет постоянный опрос, чтобы на фронте ещё до нажатия кнопки запуска показывать,
+разрешён ли он сейчас (и блокировать саму кнопку), а не только узнавать об отказе по факту `409`
+на `POST .../run`.
+- [x] `RobotAvailabilityResponse(freeRobots, totalRobots, minFreeRobots, launchAllowed)` — новый
+      DTO, `launchAllowed = freeRobots >= minFreeRobots`
+- [x] `ExecutionService.getRobotAvailability()` — читает тот же снимок, что и
+      `requireEnoughFreeRobots()` (Sprint 20); `requireEnoughFreeRobots()` теперь переиспользует
+      его вместо дублирования условия, чтобы поллинг и реальная проверка на запуске не могли
+      разойтись
+- [x] `GET /api/v1/orchestrator/robots-availability` (`OrchestratorController`, новый) —
+      read-only, без побочных эффектов, можно опрашивать с любой частотой
+- [x] Тесты: `getRobotAvailabilityReportsAllowedWhenEnoughFreeRobots`,
+      `getRobotAvailabilityReportsNotAllowedWhenNotEnoughFreeRobots` (`ExecutionServiceTest`),
+      `robotsAvailabilityReturnsSnapshotFromService` (`OrchestratorControllerTest`, новый)
+- [x] 165 тестов (было 162), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
@@ -336,6 +413,17 @@ CASCADE` — удаление сценария и без всякого ново
   `QUEUE_CHECK` действительно ждёт исчерпания повторов, а не считает `ERROR` финальным сразу же
   (или наоборот — что `IN_PROGRESS` из-за этой логики не зависает вечно, если оркестратор на
   самом деле не перекладывает транзакцию автоматически).
+- **`NaturalKey`/`NaturalKeyPart` (Sprint 19) не подтверждены на реальном стенде.** Параметры
+  фильтрации `GET /api/ExchangeQueues/v2/{id}/Items` найдены только в схеме `orc_swagger.json` —
+  ни `OrcService.java`, ни `orc_worker.py` их не используют, значит рабочие эталонные клиенты
+  этот путь не проверяли. Особенно важно перепроверить `NaturalKeyPart`: неизвестно, соответствует
+  ли она нашему контракту "строго префикс" или это скорее "вхождение в любом месте строки" —
+  на этот случай уже есть подстраховка (финальная точная фильтрация на своей стороне, см.
+  `architecture.md`), но стоит вживую убедиться, что сам параметр `NaturalKey`/`NaturalKeyPart`
+  не игнорируется молча (как было с `GET /api/ExchangeQueues/{id}/Items` без версии, Sprint 11) —
+  простейшая проверка: `QUEUE_CHECK` с `naturalKeys` на ключ, которого в большой очереди тысячи
+  элементов заведомо не имеют, должен быстро дойти до таймаута с "фактически=0", а не найти
+  случайные посторонние транзакции.
 - ~~В `TESTING.md` очередь-приёмник результата (`queueOut`) была потомком `job1`, хотя её текст
   утверждал обратное~~ — исправлено: правильная форма `queueIn → queueOut → job → checkInput →
   checkOutput` (обе очереди — предки задания). См. правило в `architecture.md`.
@@ -348,6 +436,19 @@ CASCADE` — удаление сценария и без всякого ново
   только текст исключения (например, "500 [no body]" от `RestClientException`) без URL/метода
   вызова, из-за которого не всегда сразу понятно, какой именно HTTP-вызов упал — стоит рассмотреть
   добавление метода+URI в сообщение об ошибке `OrchestratorClientSupport`.
+- **`GET /api/Robots/v2` (Sprint 20) без пагинации не подтверждён на реальном стенде с большим
+  числом роботов.** Эталонный `OrcService.getRpaRobots` тоже вызывает без `pageNumber`/`pageSize`,
+  но неизвестен реальный размер страницы по умолчанию у оркестратора — если роботов на стенде
+  больше него, `RobotsClient.list()` увидит не всех, и подсчёт свободных окажется заниженным
+  (ложные `409` при фактически достаточном числе роботов). Стоит явно проверить на стенде с
+  десятками+ роботов, либо подстраховаться постраничным перебором по аналогии с
+  `QueueCheckStepExecutor.fetchAllPages`.
+- **Блок по роботам (Sprint 20) не анализирует топологию сценария.** Блокирует `POST .../run`
+  целиком, если свободных роботов меньше `min-free-robots`, даже если в конкретном сценарии (или
+  точке возобновления через `startStepId`) вообще нет `JOB`-шагов, которым нужен робот —
+  например, сценарий из одних `QUEUE`/`QUEUE_CHECK` шагов получит `409` без всякой причины. Если
+  это окажется проблемой на практике — доработка: считать `JOB`-шаги, реально достижимые от корней/
+  `startStepId` по DAG, и пропускать проверку, если их ноль.
 
 ## Backlog (за рамками текущего скоупа)
 - Аутентификация/авторизация собственного REST API (осознанно не делали на этом этапе).

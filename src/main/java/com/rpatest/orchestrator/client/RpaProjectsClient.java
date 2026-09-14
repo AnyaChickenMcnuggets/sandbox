@@ -37,4 +37,9 @@ public class RpaProjectsClient implements RpaProjectsPort {
                 .filter(p -> name.equals(p.name()))
                 .max(Comparator.comparing(RpaProjectShortDto::active));
     }
+
+    @Override
+    public Optional<RpaProjectShortDto> findById(int id) {
+        return list().stream().filter(p -> p.id() == id).findFirst();
+    }
 }

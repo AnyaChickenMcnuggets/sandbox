@@ -44,7 +44,7 @@ public class StatusPoller {
         this.properties = properties;
     }
 
-    public RpaProjectLaunchDto pollUntilTerminal(StepRun stepRun, int assignmentId) {
+    public RpaProjectLaunchDto pollUntilTerminal(StepRun stepRun, int assignmentId, String assignmentLabel) {
         Duration interval = properties.getPolling().getInterval();
         Instant deadline = Instant.now().plus(properties.getPolling().getTimeout());
         int attempt = 0;
@@ -53,18 +53,18 @@ public class StatusPoller {
             List<RpaProjectLaunchDto> launches = rpaProjectLaunchesPort.getByAssignment(assignmentId);
             RpaProjectLaunchDto latest = latestLaunch(launches);
             if (latest != null && latest.isTerminal()) {
-                progressReporter.report(stepRun, "Задание id=" + assignmentId + " завершилось на роботе '"
+                progressReporter.report(stepRun, "Задание '" + assignmentLabel + "' завершилось на роботе '"
                         + latest.robotName() + "': " + (latest.isSuccess() ? "успешно" : "с ошибкой"));
                 return latest;
             }
 
             String state = describeState(assignmentId, latest);
-            log.debug("Попытка #{} опроса задания id={}: {}", attempt, assignmentId, state);
-            progressReporter.report(stepRun, "Задание id=" + assignmentId + " " + state + " (попытка #" + attempt + ")");
+            log.debug("Попытка #{} опроса задания '{}' (id={}): {}", attempt, assignmentLabel, assignmentId, state);
+            progressReporter.report(stepRun, "Задание '" + assignmentLabel + "' " + state + " (попытка #" + attempt + ")");
 
             if (Instant.now().isAfter(deadline)) {
                 throw new StepExecutionException(
-                        "Таймаут ожидания завершения задания id=" + assignmentId + ". Последнее известное состояние: "
+                        "Таймаут ожидания завершения задания '" + assignmentLabel + "'. Последнее известное состояние: "
                                 + state);
             }
             sleep(interval);

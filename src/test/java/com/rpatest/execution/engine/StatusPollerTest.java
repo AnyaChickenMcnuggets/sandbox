@@ -42,7 +42,7 @@ class StatusPollerTest {
         RpaProjectLaunchDto launch = launch(LocalDateTime.now(), true);
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(launch));
 
-        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1);
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1");
 
         assertThat(result.isSuccess()).isTrue();
     }
@@ -57,7 +57,7 @@ class StatusPollerTest {
                 .thenReturn(List.of(running))
                 .thenReturn(List.of(completed));
 
-        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1);
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1");
 
         assertThat(result.isSuccess()).isFalse();
     }
@@ -68,7 +68,7 @@ class StatusPollerTest {
         when(rpaProjectQueuePort.findByAssignment(1))
                 .thenReturn(List.of(new QueueItemProjectDto(1, 1, null, null, LocalDateTime.now(), null)));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1"))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("в очереди проектов");
     }
@@ -78,7 +78,7 @@ class StatusPollerTest {
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
         when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1"))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("не найдено ни в очереди проектов, ни среди запусков");
     }
@@ -89,9 +89,22 @@ class StatusPollerTest {
                 1, 7, 5, "robot-1", 1, LocalDateTime.now(), null, null, null, LocalDateTime.now());
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(running));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1"))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("robot-1");
+    }
+
+    @Test
+    void reportsAssignmentByLabelNotRawIdOnCompletion() {
+        // статусы прогона должны показывать человекочитаемое имя задания, а не голый numeric id —
+        // в реальном ответе detail выглядел как "Задание id=1447 ...", что было непонятно
+        RpaProjectLaunchDto launch = launch(LocalDateTime.now(), true);
+        when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(launch));
+
+        poller.pollUntilTerminal(stepRun, 1, "First Job_24_36");
+
+        assertThat(stepRun.getDetail()).contains("First Job_24_36");
+        assertThat(stepRun.getDetail()).doesNotContain("id=1");
     }
 
     private RpaProjectLaunchDto launch(LocalDateTime startedAt, boolean success) {

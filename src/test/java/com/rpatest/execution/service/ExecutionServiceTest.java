@@ -9,17 +9,23 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.rpatest.common.exception.ConflictException;
 import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
+import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.engine.ScenarioExecutionEngine;
 import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
+import com.rpatest.execution.web.RobotAvailabilityResponse;
 import com.rpatest.execution.web.RunResponse;
 import com.rpatest.execution.web.StepRunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
+import com.rpatest.orchestrator.client.RobotsPort;
+import com.rpatest.orchestrator.dto.RobotDto;
+import com.rpatest.orchestrator.dto.RobotRunStatus;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import com.rpatest.scenario.domain.TestScenario;
@@ -42,6 +48,7 @@ class ExecutionServiceTest {
     private ScenarioStepRepository scenarioStepRepository;
     private ScenarioExecutionEngine engine;
     private AssignmentsPort assignmentsPort;
+    private RobotsPort robotsPort;
     private ExecutionService service;
 
     @BeforeEach
@@ -52,9 +59,81 @@ class ExecutionServiceTest {
         scenarioStepRepository = mock(ScenarioStepRepository.class);
         engine = mock(ScenarioExecutionEngine.class);
         assignmentsPort = mock(AssignmentsPort.class);
+        robotsPort = mock(RobotsPort.class);
+        // По умолчанию роботов достаточно (2 из 2 свободны) — тесты, которые не про блокировку
+        // запуска, не должны заботиться об этом сами.
+        when(robotsPort.list()).thenReturn(List.of(robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.IDLE)));
         Executor synchronousExecutor = Runnable::run;
         service = new ExecutionService(scenarioRepository, runRepository, stepRunRepository, scenarioStepRepository,
-                engine, assignmentsPort, synchronousExecutor);
+                engine, assignmentsPort, robotsPort, new OrchestratorProperties(), synchronousExecutor);
+    }
+
+    @Test
+    void startRunThrowsConflictWhenFewerThanMinFreeRobots() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(robotsPort.list()).thenReturn(List.of(
+                robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.RUNNING), robot(3, RobotRunStatus.UNAVAILABLE)));
+
+        assertThatThrownBy(() -> service.startRun(1L, "tester"))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("1")
+                .hasMessageContaining("2");
+        verify(runRepository, never()).save(any());
+        verify(engine, never()).runScenario(any(), any());
+    }
+
+    @Test
+    void startRunSucceedsWhenExactlyMinFreeRobotsAvailable() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(robotsPort.list()).thenReturn(List.of(robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.IDLE)));
+        when(runRepository.save(any())).thenReturn(run(100L, 1L));
+
+        RunResponse response = service.startRun(1L, "tester");
+
+        assertThat(response.id()).isEqualTo(100L);
+    }
+
+    @Test
+    void startRunAllowsCustomMinFreeRobotsThreshold() {
+        OrchestratorProperties properties = new OrchestratorProperties();
+        properties.setMinFreeRobots(1);
+        service = new ExecutionService(scenarioRepository, runRepository, stepRunRepository, scenarioStepRepository,
+                engine, assignmentsPort, robotsPort, properties, Runnable::run);
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(robotsPort.list()).thenReturn(List.of(robot(1, RobotRunStatus.IDLE)));
+        when(runRepository.save(any())).thenReturn(run(100L, 1L));
+
+        RunResponse response = service.startRun(1L, "tester");
+
+        assertThat(response.id()).isEqualTo(100L);
+    }
+
+    @Test
+    void getRobotAvailabilityReportsAllowedWhenEnoughFreeRobots() {
+        when(robotsPort.list()).thenReturn(List.of(robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.IDLE)));
+
+        RobotAvailabilityResponse availability = service.getRobotAvailability();
+
+        assertThat(availability.freeRobots()).isEqualTo(2);
+        assertThat(availability.totalRobots()).isEqualTo(2);
+        assertThat(availability.minFreeRobots()).isEqualTo(2);
+        assertThat(availability.launchAllowed()).isTrue();
+    }
+
+    @Test
+    void getRobotAvailabilityReportsNotAllowedWhenNotEnoughFreeRobots() {
+        // тот же снимок, который используют фронт для поллинга и сам запуск для решения — не
+        // побочный эффект, не создаёт прогон, не бросает исключение
+        when(robotsPort.list()).thenReturn(List.of(
+                robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.RUNNING), robot(3, RobotRunStatus.UNAVAILABLE)));
+
+        RobotAvailabilityResponse availability = service.getRobotAvailability();
+
+        assertThat(availability.freeRobots()).isEqualTo(1);
+        assertThat(availability.totalRobots()).isEqualTo(3);
+        assertThat(availability.minFreeRobots()).isEqualTo(2);
+        assertThat(availability.launchAllowed()).isFalse();
+        verify(runRepository, never()).save(any());
     }
 
     @Test
@@ -236,6 +315,10 @@ class ExecutionServiceTest {
 
     private TestScenario scenario(String name) {
         return new TestScenario(name, null);
+    }
+
+    private RobotDto robot(int id, RobotRunStatus status) {
+        return new RobotDto(id, "robot-" + id, status);
     }
 
     private void setStepIdToNull(StepRun stepRun) {

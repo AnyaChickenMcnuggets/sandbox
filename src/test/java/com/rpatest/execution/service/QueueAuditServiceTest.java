@@ -72,6 +72,23 @@ class QueueAuditServiceTest {
     }
 
     @Test
+    void filtersByNaturalKeyOnTheOrchestratorSideWhenProvided() {
+        UUID queueId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        StepRun stepRun = new StepRun(1L, 2L);
+        stepRun.setOrchestratorQueueId(queueId);
+        when(stepRunRepository.findByScenarioRunIdAndStepId(1L, 2L)).thenReturn(Optional.of(stepRun));
+        ExchangeQueueValueDto item = new ExchangeQueueValueDto(
+                itemId, "value", "tx-1", null, null, null, ExchangeQueueValueEventType.SUCCESS, "ok", null);
+        when(exchangeQueuesPort.listItems(queueId, 0, 100, "tx-1", false)).thenReturn(ListResultDto.of(1, List.of(item)));
+
+        List<QueueItemResponse> result = service.auditQueueItems(1L, 2L, 0, 100, "tx-1", false);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).naturalKey()).isEqualTo("tx-1");
+    }
+
+    @Test
     void returnsEmptyListWhenOrchestratorItemsAreNull() {
         UUID queueId = UUID.randomUUID();
         StepRun stepRun = new StepRun(1L, 2L);

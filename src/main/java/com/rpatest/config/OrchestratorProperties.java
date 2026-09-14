@@ -14,12 +14,25 @@ public class OrchestratorProperties {
     private Polling queueCheckPolling = new Polling(Duration.ofSeconds(5), Duration.ofMinutes(10));
     private Tls tls = new Tls();
 
+    /** Минимум свободных (Idle) роботов на оркестраторе, при котором разрешён запуск сценария —
+     * иначе {@code ExecutionService.startRun} блокирует запуск (409), чтобы не ставить задания в
+     * очередь заведомо без шанса на скорое исполнение. */
+    private int minFreeRobots = 2;
+
     public String getBaseUrl() {
         return baseUrl;
     }
 
     public void setBaseUrl(String baseUrl) {
         this.baseUrl = baseUrl;
+    }
+
+    public int getMinFreeRobots() {
+        return minFreeRobots;
+    }
+
+    public void setMinFreeRobots(int minFreeRobots) {
+        this.minFreeRobots = minFreeRobots;
     }
 
     public Credentials getCredentials() {

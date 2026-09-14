@@ -129,6 +129,26 @@ class ExchangeQueuesClientTest {
     }
 
     @Test
+    void listItemsWithNaturalKeyFiltersOnTheOrchestratorSide() {
+        // NaturalKey/NaturalKeyPart — параметры фильтрации того же v2-эндпоинта (см. orc_swagger.json),
+        // используются вместо постраничного перебора всей очереди при поиске конкретных ключей.
+        UUID queueId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/v2/" + queueId + "/Items"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"totalCount\":1,\"filterCount\":1,\"result\":[{\"id\":\"" + itemId
+                                + "\",\"value\":\"v\",\"naturalKey\":\"tx-1\",\"createdAt\":\"2024-01-01T00:00:00.123456\",\"lastEventType\":0}]}")));
+
+        ListResultDto<ExchangeQueueValueDto> page = client.listItems(queueId, 0, 100, "tx-1", true);
+
+        assertThat(page.result()).hasSize(1);
+        wireMockServer.verify(1, com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor(
+                        urlPathEqualTo("/api/ExchangeQueues/v2/" + queueId + "/Items"))
+                .withQueryParam("NaturalKey", com.github.tomakehurst.wiremock.client.WireMock.equalTo("tx-1"))
+                .withQueryParam("NaturalKeyPart", com.github.tomakehurst.wiremock.client.WireMock.equalTo("true")));
+    }
+
+    @Test
     void listItemsDoesNotHitTheStaleV1Endpoint() {
         UUID queueId = UUID.randomUUID();
         wireMockServer.stubFor(get(urlPathEqualTo("/api/ExchangeQueues/" + queueId + "/Items"))

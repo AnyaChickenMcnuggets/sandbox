@@ -10,4 +10,8 @@ public interface RpaProjectsPort {
 
     /** Ищет проект по точному имени; если совпадений несколько (разные версии) — предпочитает активный. */
     Optional<RpaProjectShortDto> findByName(String name);
+
+    /** Для отображения человекочитаемого имени проекта, когда шаг сценария указывает его по id
+     * ({@code JobStepConfig.rpaProjectId}) — иначе в статусах прогона нечего показать, кроме id. */
+    Optional<RpaProjectShortDto> findById(int id);
 }

@@ -81,6 +81,28 @@ public class ExchangeQueuesClient implements ExchangeQueuesPort {
     }
 
     @Override
+    @Retry(name = "orchestrator-read")
+    @CircuitBreaker(name = "orchestrator")
+    public ListResultDto<ExchangeQueueValueDto> listItems(
+            UUID queueId, int pageNumber, int pageSize, String naturalKey, boolean naturalKeyPart) {
+        // NaturalKey/NaturalKeyPart — параметры фильтрации того же v2-эндпоинта на стороне
+        // оркестратора (см. orc_swagger.json), не задокументированные ни в OrcService.java, ни в
+        // orc_worker.py, но присутствующие в схеме — фильтрация по ним избавляет от постраничного
+        // перебора всей (потенциально многотысячной) очереди ради поиска известных ключей.
+        return OrchestratorClientSupport.execute("list items of queue " + queueId + " by naturalKey " + naturalKey,
+                () -> restClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/api/ExchangeQueues/v2/{id}/Items")
+                                .queryParam("pageNumber", pageNumber)
+                                .queryParam("pageSize", pageSize)
+                                .queryParam("NaturalKey", naturalKey)
+                                .queryParam("NaturalKeyPart", naturalKeyPart)
+                                .build(queueId))
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<ListResultDto<ExchangeQueueValueDto>>() {
+                        }));
+    }
+
+    @Override
     @Retry(name = "orchestrator-write")
     @CircuitBreaker(name = "orchestrator")
     public void delete(UUID queueId) {
