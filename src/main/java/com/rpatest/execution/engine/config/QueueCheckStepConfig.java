@@ -19,8 +19,10 @@ import java.util.Map;
  *                    одной входной транзакции на несколько выходных); если пусто — все элементы
  *                    очереди на момент проверки
  * @param naturalKeyPrefixMatch см. {@link #naturalKeys}; по умолчанию {@code false} (точное совпадение)
- * @param expectedStatusCounts точные ожидаемые количества по статусу — ключи "SUCCESS",
- *                    "ERROR", "BUSINESS_ERROR", "NEW", "IN_PROGRESS" (см. {@link
+ * @param expectedStatusCounts минимальные ожидаемые количества по статусу — проверка проходит,
+ *                    когда фактическое количество элементов с данным статусом **не меньше**
+ *                    указанного (не точное совпадение), ключи "SUCCESS", "ERROR", "BUSINESS_ERROR",
+ *                    "NEW", "IN_PROGRESS" (см. {@link
  *                    com.rpatest.orchestrator.dto.QueueItemDerivedStatus}); проверяются только
  *                    перечисленные статусы, остальные не ограничиваются
  * @param minTotalCount минимальное количество подходящих (под naturalKeys) элементов — для

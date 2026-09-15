@@ -223,6 +223,14 @@ public class QueueCheckStepExecutor implements StepExecutor {
         return status;
     }
 
+    /**
+     * {@code expectedStatusCounts} — это минимум по каждому статусу, а не точное совпадение:
+     * проверка проходит, когда фактическое количество **не меньше** ожидаемого. Оркестратор может
+     * дообработать транзакции уже после того, как ожидание было достигнуто (например, довыполнить
+     * ещё несколько запусков из связанного `RunStatuses` фильтра или досчитать повторы), и жёсткое
+     * равенство заставляло бы шаг падать по гонке между моментом опроса и моментом достижения
+     * искомого количества — хотя сценарий автора уже выполнился так, как ожидалось.
+     */
     private boolean satisfies(
             Map<String, Integer> expected, Integer minTotalCount, Map<String, Long> actualCounts, int actualTotal) {
         if (minTotalCount != null && actualTotal < minTotalCount) {
@@ -230,7 +238,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
         }
         for (Map.Entry<String, Integer> entry : expected.entrySet()) {
             long actual = actualCounts.getOrDefault(entry.getKey(), 0L);
-            if (actual != entry.getValue()) {
+            if (actual < entry.getValue()) {
                 return false;
             }
         }
@@ -239,7 +247,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
 
     private String describeExpectation(Map<String, Integer> expected, Integer minTotalCount) {
         StringBuilder sb = new StringBuilder();
-        expected.forEach((status, count) -> sb.append(status).append("=").append(count).append(" "));
+        expected.forEach((status, count) -> sb.append(status).append(">=").append(count).append(" "));
         if (minTotalCount != null) {
             sb.append("(всего >= ").append(minTotalCount).append(")");
         }

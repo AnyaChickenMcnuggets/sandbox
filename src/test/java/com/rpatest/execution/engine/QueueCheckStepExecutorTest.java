@@ -195,7 +195,23 @@ class QueueCheckStepExecutorTest {
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))
                 .isInstanceOf(StepExecutionException.class)
-                .hasMessageContaining("SUCCESS=5");
+                .hasMessageContaining("SUCCESS>=5");
+    }
+
+    @Test
+    void succeedsWhenActualCountExceedsExpected() {
+        // expectedStatusCounts — минимум, а не точное совпадение: больше ожидаемого тоже проходит
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(3, List.of(
+                item("k1", ExchangeQueueValueEventType.SUCCESS),
+                item("k2", ExchangeQueueValueEventType.SUCCESS),
+                item("k3", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("SUCCESS", 1)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
     }
 
     @Test

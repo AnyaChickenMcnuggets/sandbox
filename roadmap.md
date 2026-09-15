@@ -359,6 +359,19 @@ CASCADE` — удаление сценария и без всякого ново
       `robotsAvailabilityReturnsSnapshotFromService` (`OrchestratorControllerTest`, новый)
 - [x] 165 тестов (было 162), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 22 — expectedStatusCounts: минимум, а не точное совпадение — DONE
+Пользователь: при проверке очереди статусы должны сравниваться не строгим равенством 1:1, а
+"больше или равно" указанному.
+- [x] `QueueCheckStepExecutor.satisfies` — `actual < expected` вместо `actual != expected`:
+      статус проходит проверку, когда фактическое количество не меньше ожидаемого
+- [x] `describeExpectation` показывает ожидания как `SUCCESS>=N` вместо `SUCCESS=N` — текст
+      сообщений (`detail`, таймаут-ошибка) сразу отражает новую семантику, а не вводит в
+      заблуждение
+- [x] Javadoc `QueueCheckStepConfig.expectedStatusCounts` обновлён под новую семантику
+- [x] Тест `succeedsWhenActualCountExceedsExpected` — фактическое количество больше ожидаемого
+      минимума проходит проверку (раньше падало бы)
+- [x] 166 тестов (было 165), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).
