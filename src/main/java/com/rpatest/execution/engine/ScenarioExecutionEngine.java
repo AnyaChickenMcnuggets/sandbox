@@ -10,7 +10,9 @@ import com.rpatest.scenario.domain.ScenarioStepEdge;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import com.rpatest.scenario.repository.ScenarioStepEdgeRepository;
 import com.rpatest.scenario.repository.ScenarioStepRepository;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -23,7 +25,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-/** Обходит DAG шагов сценария, исполняя независимые ветки параллельно (fan-out). */
+/**
+ * Обходит DAG шагов сценария, исполняя независимые ветки параллельно (fan-out) и синхронизируя
+ * узлы с несколькими родителями (fan-in) — такой узел выполняется один раз, после того как все его
+ * родители, относящиеся к текущему прогону, завершились успешно.
+ */
 @Component
 public class ScenarioExecutionEngine {
 
@@ -59,8 +65,9 @@ public class ScenarioExecutionEngine {
     /**
      * @param startStepId если задан — обход DAG начинается с этого шага (единственный "корень" для
      *                    данного прогона) вместо обычных корней сценария. Шаги, до которых обход не
-     *                    дойдёт, остаются {@code PENDING} — так же, как шаги, пропущенные из-за
-     *                    падения предка (см. {@code runStep}).
+     *                    дойдёт (в том числе родители узла с fan-in, недостижимые из точки старта),
+     *                    остаются {@code PENDING} — так же, как шаги, пропущенные из-за падения
+     *                    предка (см. {@code runStep}).
      */
     public void runScenario(Long runId, Long startStepId) {
         ScenarioRun run = runRepository.findById(runId)
@@ -86,9 +93,11 @@ public class ScenarioExecutionEngine {
             List<ScenarioStepEdge> edges = stepIds.isEmpty() ? List.of() : edgeRepository.findByStepIds(stepIds);
 
             Map<Long, List<Long>> outgoing = new HashMap<>();
+            Map<Long, List<Long>> incoming = new HashMap<>();
             Set<Long> hasIncoming = new HashSet<>();
             for (ScenarioStepEdge edge : edges) {
                 outgoing.computeIfAbsent(edge.getFromStepId(), k -> new ArrayList<>()).add(edge.getToStepId());
+                incoming.computeIfAbsent(edge.getToStepId(), k -> new ArrayList<>()).add(edge.getFromStepId());
                 hasIncoming.add(edge.getToStepId());
             }
 
@@ -108,10 +117,16 @@ public class ScenarioExecutionEngine {
             log.info("Прогон {}: {} шаг(ов) всего, {} корневых: {}", runId, steps.size(), roots.size(),
                     roots.stream().map(ScenarioStep::getName).toList());
 
-            CompletableFuture<?>[] rootFutures = roots.stream()
-                    .map(root -> executeStepAsync(run, root, stepsById, outgoing))
+            // Шаги, недостижимые из корней этого прогона (например, ветки "до" startStepId), не
+            // считаются относящимися к прогону — родитель fan-in-узла из этого множества не должен
+            // блокировать узел ожиданием, потому что в этом прогоне он в принципе не будет исполнен.
+            Set<Long> reachable = computeReachable(roots, outgoing);
+
+            Map<Long, CompletableFuture<RunStatus>> futuresByStepId = new HashMap<>();
+            CompletableFuture<?>[] allFutures = reachable.stream()
+                    .map(id -> getOrCreateFuture(id, run, stepsById, incoming, reachable, futuresByStepId))
                     .toArray(CompletableFuture[]::new);
-            CompletableFuture.allOf(rootFutures).join();
+            CompletableFuture.allOf(allFutures).join();
 
             boolean anyFailed = stepRunRepository.findByScenarioRunId(runId).stream()
                     .anyMatch(sr -> sr.getStatus() == RunStatus.FAILED);
@@ -125,33 +140,72 @@ public class ScenarioExecutionEngine {
         }
     }
 
+    private Set<Long> computeReachable(List<ScenarioStep> roots, Map<Long, List<Long>> outgoing) {
+        Set<Long> visited = new HashSet<>();
+        Deque<Long> queue = new ArrayDeque<>();
+        roots.forEach(r -> queue.add(r.getId()));
+        while (!queue.isEmpty()) {
+            Long id = queue.poll();
+            if (!visited.add(id)) {
+                continue;
+            }
+            for (Long next : outgoing.getOrDefault(id, List.of())) {
+                if (!visited.contains(next)) {
+                    queue.add(next);
+                }
+            }
+        }
+        return visited;
+    }
+
     /**
-     * Не блокирует поток на {@code .join()} в ожидании дочерних шагов — при recursion через
-     * {@code runAsync(...).join()} каждый уровень цепочки навсегда занимал отдельный поток пула,
-     * и на цепочке длиннее {@code corePoolSize} (см. {@code AsyncConfig}) все core-потоки
-     * оказывались заблокированы в ожидании друг друга раньше, чем пул успевал вырасти до
-     * {@code maxPoolSize} — {@code ThreadPoolExecutor} создаёт потоки сверх core только когда
-     * очередь заполнена, а не когда все core-потоки заняты/блокированы. {@code thenComposeAsync}
-     * планирует продолжение на пуле по готовности, не занимая поток ожиданием.
+     * Пулл-модель вместо push-рекурсии от родителя к потомку: каждый узел сам вычисляет своё
+     * будущее как зависимость от будущих СВОИХ родителей (только тех, что входят в {@code
+     * reachable} — см. {@code runScenario}), а не наоборот. Это даёт fan-in "бесплатно" —
+     * {@code futuresByStepId} мемоизирует по {@code stepId}, так что узел с несколькими входящими
+     * рёбрами получает ровно одно будущее независимо от того, сколько родителей на него ссылаются,
+     * и это будущее ждёт ВСЕХ релевантных родителей, а не срабатывает на первом из них. Не блокирует
+     * поток на {@code .join()} в ожидании родителей — {@code .join()} внутри {@code
+     * thenComposeAsync} вызывается только на уже завершённых (см. {@code allOf(...)} перед ним)
+     * будущих, то есть не ждёт, а мгновенно читает готовый результат. Сохраняет то же свойство, ради
+     * которого раньше был правлен дедлок движка (см. Sprint 14 в {@code roadmap.md}): продолжение
+     * планируется на пуле по готовности, ни один поток не занимается ожиданием.
      */
-    private CompletableFuture<Void> executeStepAsync(
-            ScenarioRun run, ScenarioStep step, Map<Long, ScenarioStep> stepsById, Map<Long, List<Long>> outgoing) {
-        return CompletableFuture.supplyAsync(() -> runStep(run, step), executor)
-                .thenComposeAsync(status -> {
-                    if (status != RunStatus.SUCCEEDED) {
-                        return CompletableFuture.completedFuture(null);
-                    }
-                    List<Long> nextStepIds = outgoing.getOrDefault(step.getId(), List.of());
-                    if (nextStepIds.isEmpty()) {
-                        return CompletableFuture.completedFuture(null);
-                    }
-                    log.info("Прогон {}: шаг '{}' запускает следующие шаги: {}", run.getId(), step.getName(),
-                            nextStepIds.stream().map(id -> stepsById.get(id).getName()).toList());
-                    CompletableFuture<?>[] childFutures = nextStepIds.stream()
-                            .map(id -> executeStepAsync(run, stepsById.get(id), stepsById, outgoing))
-                            .toArray(CompletableFuture[]::new);
-                    return CompletableFuture.allOf(childFutures);
-                }, executor);
+    private CompletableFuture<RunStatus> getOrCreateFuture(
+            Long stepId, ScenarioRun run, Map<Long, ScenarioStep> stepsById, Map<Long, List<Long>> incoming,
+            Set<Long> reachable, Map<Long, CompletableFuture<RunStatus>> futuresByStepId) {
+        CompletableFuture<RunStatus> existing = futuresByStepId.get(stepId);
+        if (existing != null) {
+            return existing;
+        }
+
+        ScenarioStep step = stepsById.get(stepId);
+        List<Long> relevantParents = incoming.getOrDefault(stepId, List.of()).stream()
+                .filter(reachable::contains)
+                .toList();
+
+        CompletableFuture<RunStatus> future;
+        if (relevantParents.isEmpty()) {
+            future = CompletableFuture.supplyAsync(() -> runStep(run, step), executor);
+        } else {
+            List<CompletableFuture<RunStatus>> parentFutures = relevantParents.stream()
+                    .map(parentId -> getOrCreateFuture(parentId, run, stepsById, incoming, reachable, futuresByStepId))
+                    .toList();
+            future = CompletableFuture.allOf(parentFutures.toArray(CompletableFuture[]::new))
+                    .thenComposeAsync(v -> {
+                        boolean allParentsSucceeded = parentFutures.stream()
+                                .allMatch(f -> f.join() == RunStatus.SUCCEEDED);
+                        if (!allParentsSucceeded) {
+                            log.info("Прогон {}: шаг '{}' (id={}) не запущен — не все предшественники "
+                                            + "(fan-in) этого прогона завершились успешно, шаг остаётся PENDING",
+                                    run.getId(), step.getName(), stepId);
+                            return CompletableFuture.completedFuture(RunStatus.FAILED);
+                        }
+                        return CompletableFuture.supplyAsync(() -> runStep(run, step), executor);
+                    }, executor);
+        }
+        futuresByStepId.put(stepId, future);
+        return future;
     }
 
     private RunStatus runStep(ScenarioRun run, ScenarioStep step) {

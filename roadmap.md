@@ -372,6 +372,49 @@ CASCADE` — удаление сценария и без всякого ново
       минимума проходит проверку (раньше падало бы)
 - [x] 166 тестов (было 165), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 23 — Ручной аудит очереди по умолчанию сужает до своих ключей — DONE
+Пользователь: во время запуска сценария просмотр транзакций очереди всё ещё показывает полный
+список, а не только по naturalKey созданных (`QUEUE`) или отслеживаемых (`QUEUE_CHECK`) транзакций.
+- [x] `QueueItemFinder` (новый, `execution/engine`) — вынесен из `QueueCheckStepExecutor`
+      (постраничный полный обзор при пустом `naturalKeys`, фильтр оркестратора по каждому ключу при
+      непустом + собственная точная дозачистка) как канонический хелпер поиска элементов очереди —
+      не дублировать логику по AGENTS.md
+- [x] `QueueAuditService.auditQueueItems` без явного `naturalKey` теперь сам выводит фильтр из
+      `ScenarioStep.config` шага: `QUEUE` → naturalKey его собственных `transactions`, `QUEUE_CHECK`
+      → его `naturalKeys`/`naturalKeyPrefixMatch`. Явный `naturalKey` в запросе по-прежнему
+      перекрывает автоматику. Если шаг ничего не отслеживает по ключу (`minTotalCount`-only
+      `QUEUE_CHECK`) или `scenario_step` уже удалён — остаётся честный постраничный обзор всей
+      очереди, как раньше (это не баг для этого случая)
+- [x] `QueueCheckStepExecutor` переведён на `QueueItemFinder`, свои приватные
+      `fetchMatchingItems`/`fetchByNaturalKeys`/`fetchAllPages` удалены
+- [x] Тесты: `QueueItemFinderTest` (новый), `autoFiltersToQueueStepsOwnTransactionNaturalKeysByDefault`,
+      `autoFiltersToQueueCheckStepsTrackedNaturalKeysByDefault`,
+      `showsWholeQueueForQueueCheckStepThatWatchesEntireQueue`,
+      `explicitNaturalKeyOverridesAutoDerivedFilter` (`QueueAuditServiceTest`)
+- [x] 173 теста (было 166), `mvn verify` (JaCoCo) — зелёный
+
+## Sprint 24 — Fan-in (несколько родителей у одного шага) — DONE
+Пользователь: если несколько блоков входят в один — выполнять его только если все предшествующие
+блоки, которые в него входят, были выполнены и выполнены успешно. Если сценарий запускается с места
+и это одна из веток, входящих в такой узел — выполнять его, потому что другие ветки не существуют
+в этом запуске.
+- [x] `ScenarioExecutionEngine` переведён с push-рекурсии (`executeStepAsync`: родитель после
+      успеха сам вызывает детей) на пулл-модель (`getOrCreateFuture`): узел сам собирает будущие
+      своих родителей и ждёт ВСЕХ их, `futuresByStepId` мемоизирует по `stepId` — узел с несколькими
+      входящими рёбрами получает одно будущее и выполняется один раз, не дважды параллельно, как
+      было раньше (см. старую формулировку в `agents.md`/`architecture.md` — исправлена)
+- [x] Успех требуется от всех родителей (`allMatch(SUCCEEDED)`), не "хотя бы одного" — если один упал
+      или не выполнялся, fan-in-узел не запускается и остаётся `PENDING`, каскадируется дальше по DAG
+- [x] `computeReachable` (BFS от корней по `outgoing`) — родитель, недостижимый в этом прогоне
+      (ветка "до" `startStepId`), не входит в `incoming`-фильтр и не блокирует fan-in-узел ожиданием
+- [x] Сохранено свойство "не блокировать поток на `.join()`" (Sprint 14) — `.join()` внутри
+      `thenComposeAsync` вызывается только после `allOf(parentFutures)`, то есть на уже завершённых
+      будущих
+- [x] Тесты (`ScenarioExecutionEngineTest`): `fanInStepRunsOnceOnlyAfterAllParentsSucceed`,
+      `fanInStepStaysPendingWhenOneParentFails`,
+      `fanInStepRunsWhenOtherBranchDoesNotExistInThisRunDueToStartStepId`
+- [x] 176 тестов (было 173), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

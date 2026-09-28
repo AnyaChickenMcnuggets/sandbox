@@ -41,8 +41,8 @@ class QueueCheckStepExecutorTest {
         properties.getQueueCheckPolling().setInterval(Duration.ofMillis(10));
         properties.getQueueCheckPolling().setTimeout(Duration.ofMillis(150));
         StepProgressReporter progressReporter = new StepProgressReporter(mock(StepRunRepository.class));
-        executor = new QueueCheckStepExecutor(exchangeQueuesPort, new ExchangeQueueProvisioner(exchangeQueuesPort),
-                progressReporter, properties, new ObjectMapper());
+        executor = new QueueCheckStepExecutor(new QueueItemFinder(exchangeQueuesPort),
+                new ExchangeQueueProvisioner(exchangeQueuesPort), progressReporter, properties, new ObjectMapper());
     }
 
     @Test

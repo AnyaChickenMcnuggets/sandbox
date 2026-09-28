@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.engine.config.QueueCheckStepConfig;
-import com.rpatest.orchestrator.client.ExchangeQueuesPort;
 import com.rpatest.orchestrator.dto.ExchangeQueueDto;
 import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
 import com.rpatest.orchestrator.dto.QueueItemDerivedStatus;
@@ -14,7 +13,6 @@ import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,22 +35,19 @@ public class QueueCheckStepExecutor implements StepExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(QueueCheckStepExecutor.class);
 
-    private static final int PAGE_SIZE = 200;
-    private static final int MAX_PAGES = 50;
-
-    private final ExchangeQueuesPort exchangeQueuesPort;
+    private final QueueItemFinder queueItemFinder;
     private final ExchangeQueueProvisioner queueProvisioner;
     private final StepProgressReporter progressReporter;
     private final OrchestratorProperties properties;
     private final ObjectMapper objectMapper;
 
     public QueueCheckStepExecutor(
-            ExchangeQueuesPort exchangeQueuesPort,
+            QueueItemFinder queueItemFinder,
             ExchangeQueueProvisioner queueProvisioner,
             StepProgressReporter progressReporter,
             OrchestratorProperties properties,
             ObjectMapper objectMapper) {
-        this.exchangeQueuesPort = exchangeQueuesPort;
+        this.queueItemFinder = queueItemFinder;
         this.queueProvisioner = queueProvisioner;
         this.progressReporter = progressReporter;
         this.properties = properties;
@@ -124,7 +119,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
         int attempt = 0;
         while (true) {
             attempt++;
-            List<ExchangeQueueValueDto> matching = fetchMatchingItems(queueId, naturalKeyFilter, prefixMatch);
+            List<ExchangeQueueValueDto> matching = queueItemFinder.find(queueId, naturalKeyFilter, prefixMatch);
             actualCounts = countByStatus(matching, maxRetray);
             actualTotal = matching.size();
 
@@ -143,63 +138,6 @@ public class QueueCheckStepExecutor implements StepExecutor {
             }
             sleep(interval);
         }
-    }
-
-    private List<ExchangeQueueValueDto> fetchMatchingItems(UUID queueId, Set<String> naturalKeyFilter, boolean prefixMatch) {
-        List<ExchangeQueueValueDto> all = naturalKeyFilter.isEmpty()
-                ? fetchAllPages(queueId, null, false)
-                : fetchByNaturalKeys(queueId, naturalKeyFilter, prefixMatch);
-        // Удалённые транзакции (deletedAt != null) не должны влиять на исход проверки — иначе
-        // удаление элемента из очереди (вручную или самим оркестратором) искажает и общее число
-        // элементов, и распределение по статусам, которое сравнивается с ожиданием сценария.
-        all = all.stream().filter(i -> i.deletedAt() == null).toList();
-        if (naturalKeyFilter.isEmpty()) {
-            return all;
-        }
-        // Сервер уже отфильтровал по каждому ключу (NaturalKey/NaturalKeyPart), но точную
-        // семантику "начинается с" для prefix-режима перепроверяем сами — не задокументировано,
-        // что NaturalKeyPart на стороне оркестратора означает именно префикс, а не вхождение где
-        // угодно в строке, а наш контракт (см. тесты) — строго префикс.
-        if (prefixMatch) {
-            return all.stream()
-                    .filter(i -> i.naturalKey() != null
-                            && naturalKeyFilter.stream().anyMatch(prefix -> i.naturalKey().startsWith(prefix)))
-                    .toList();
-        }
-        return all.stream().filter(i -> i.naturalKey() != null && naturalKeyFilter.contains(i.naturalKey())).toList();
-    }
-
-    /**
-     * Один запрос на naturalKey (с фильтрацией на стороне оркестратора, см.
-     * {@code ExchangeQueuesPort.listItems(..., naturalKey, naturalKeyPart)}), вместо постраничного
-     * перебора всей очереди целиком: очередь может содержать тысячи транзакций, а нас интересуют
-     * только несколько конкретных ключей — раньше это не только тянуло лишние тысячи элементов,
-     * но и могло вовсе не найти искомую транзакцию, если она попадала за пределы {@code MAX_PAGES}
-     * постраничного перебора.
-     */
-    private List<ExchangeQueueValueDto> fetchByNaturalKeys(UUID queueId, Set<String> naturalKeyFilter, boolean prefixMatch) {
-        List<ExchangeQueueValueDto> result = new ArrayList<>();
-        for (String naturalKey : naturalKeyFilter) {
-            result.addAll(fetchAllPages(queueId, naturalKey, prefixMatch));
-        }
-        return result;
-    }
-
-    private List<ExchangeQueueValueDto> fetchAllPages(UUID queueId, String naturalKey, boolean naturalKeyPart) {
-        List<ExchangeQueueValueDto> all = new ArrayList<>();
-        for (int page = 0; page < MAX_PAGES; page++) {
-            List<ExchangeQueueValueDto> items = naturalKey == null
-                    ? exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE).result()
-                    : exchangeQueuesPort.listItems(queueId, page, PAGE_SIZE, naturalKey, naturalKeyPart).result();
-            if (items == null || items.isEmpty()) {
-                break;
-            }
-            all.addAll(items);
-            if (items.size() < PAGE_SIZE) {
-                break;
-            }
-        }
-        return all;
     }
 
     private Map<String, Long> countByStatus(List<ExchangeQueueValueDto> items, int maxRetray) {

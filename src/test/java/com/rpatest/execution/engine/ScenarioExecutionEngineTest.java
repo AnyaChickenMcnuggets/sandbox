@@ -333,6 +333,116 @@ class ScenarioExecutionEngineTest {
         assertThat(run.getStatus()).isEqualTo(RunStatus.SUCCEEDED);
     }
 
+    @Test
+    void fanInStepRunsOnceOnlyAfterAllParentsSucceed() {
+        // queueA -> join, queueB -> join: join должен подождать ОБОИХ родителей и выполниться один раз
+        ScenarioStep queueA = step(1L, ScenarioStepType.QUEUE, "queueA");
+        ScenarioStep queueB = step(2L, ScenarioStepType.QUEUE, "queueB");
+        ScenarioStep join = step(3L, ScenarioStepType.JOB, "join");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(queueA, queueB, join));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of(
+                new ScenarioStepEdge(1L, 3L), new ScenarioStepEdge(2L, 3L)));
+
+        StepExecutor succeedingExecutor = new RecordingExecutor(null);
+        java.util.concurrent.atomic.AtomicInteger joinExecutions = new java.util.concurrent.atomic.AtomicInteger();
+        StepExecutor joinExecutor = new StepExecutor() {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.JOB;
+            }
+
+            @Override
+            public void execute(StepRun stepRun, ScenarioStep step) {
+                joinExecutions.incrementAndGet();
+            }
+        };
+
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(joinExecutor, alsoSupports(succeedingExecutor, ScenarioStepType.QUEUE)),
+                Executors.newFixedThreadPool(2));
+
+        engine.runScenario(10L);
+
+        assertThat(joinExecutions.get()).isEqualTo(1);
+        assertThat(stepRunFor(1L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(stepRunFor(3L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(run.getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+    }
+
+    @Test
+    void fanInStepStaysPendingWhenOneParentFails() {
+        ScenarioStep queueA = step(1L, ScenarioStepType.QUEUE, "queueA");
+        ScenarioStep queueB = step(2L, ScenarioStepType.QUEUE, "queueB");
+        ScenarioStep join = step(3L, ScenarioStepType.JOB, "join");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(queueA, queueB, join));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of(
+                new ScenarioStepEdge(1L, 3L), new ScenarioStepEdge(2L, 3L)));
+
+        StepExecutor succeedingQueue = new RecordingExecutor(null) {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.QUEUE;
+            }
+        };
+        StepExecutor failingQueueB = new StepExecutor() {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.QUEUE;
+            }
+
+            @Override
+            public void execute(StepRun stepRun, ScenarioStep step) {
+                if (step.getId().equals(2L)) {
+                    throw new StepExecutionException("boom");
+                }
+            }
+        };
+        StepExecutor joinExecutor = new RecordingExecutor(null) {
+            @Override
+            public ScenarioStepType supports() {
+                return ScenarioStepType.JOB;
+            }
+        };
+
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(joinExecutor, failingQueueB), Executors.newFixedThreadPool(2));
+
+        engine.runScenario(10L);
+
+        assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.FAILED);
+        assertThat(stepRunFor(3L).getStatus()).isEqualTo(RunStatus.PENDING);
+        assertThat(run.getStatus()).isEqualTo(RunStatus.FAILED);
+    }
+
+    @Test
+    void fanInStepRunsWhenOtherBranchDoesNotExistInThisRunDueToStartStepId() {
+        // queueA -> join, queueB -> join; запуск с queueA не должен ждать queueB — той ветки нет в
+        // этом прогоне (пользовательский сценарий: запуск с места, где одна из веток fan-in не
+        // существует в текущем прогоне)
+        ScenarioStep queueA = step(1L, ScenarioStepType.QUEUE, "queueA");
+        ScenarioStep queueB = step(2L, ScenarioStepType.QUEUE, "queueB");
+        ScenarioStep join = step(3L, ScenarioStepType.JOB, "join");
+        when(stepRepository.findByScenarioIdOrderByPosition(100L)).thenReturn(List.of(queueA, queueB, join));
+        when(edgeRepository.findByStepIds(any())).thenReturn(List.of(
+                new ScenarioStepEdge(1L, 3L), new ScenarioStepEdge(2L, 3L)));
+
+        StepExecutor succeedingExecutor = new RecordingExecutor(null);
+        ScenarioExecutionEngine engine = new ScenarioExecutionEngine(
+                stepRepository, edgeRepository, runRepository, stepRunRepository,
+                List.of(succeedingExecutor, alsoSupports(succeedingExecutor, ScenarioStepType.QUEUE)),
+                Runnable::run);
+
+        engine.runScenario(10L, 1L);
+
+        assertThat(stepRunFor(1L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(stepRunFor(2L).getStatus()).isEqualTo(RunStatus.PENDING);
+        assertThat(stepRunFor(3L).getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(run.getStatus()).isEqualTo(RunStatus.SUCCEEDED);
+    }
+
     private StepExecutor alsoSupports(StepExecutor delegate, ScenarioStepType type) {
         return new StepExecutor() {
             @Override
