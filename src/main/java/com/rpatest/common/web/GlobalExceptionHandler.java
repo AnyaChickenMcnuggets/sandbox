@@ -1,5 +1,6 @@
 package com.rpatest.common.web;
 
+import com.rpatest.auth.service.InvalidCredentialsException;
 import com.rpatest.common.exception.ConflictException;
 import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
@@ -32,6 +33,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ErrorResponse> handleConflict(ConflictException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of("CONFLICT", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ErrorResponse.of("INVALID_CREDENTIALS", e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -10,6 +10,7 @@ import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.orchestrator.client.RpaProjectLaunchesPort;
 import com.rpatest.orchestrator.client.RpaProjectQueuePort;
+import com.rpatest.orchestrator.client.RpaProjectsPort;
 import com.rpatest.orchestrator.dto.QueueItemProjectDto;
 import com.rpatest.orchestrator.dto.RpaProjectLaunchDto;
 import java.time.Duration;
@@ -33,7 +34,8 @@ class StatusPollerTest {
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.getPolling().setInterval(Duration.ofMillis(10));
         properties.getPolling().setTimeout(Duration.ofMillis(150));
-        poller = new StatusPoller(rpaProjectLaunchesPort, rpaProjectQueuePort, progressReporter, properties);
+        OrchestratorLookup orchestratorLookup = new OrchestratorLookup(mock(RpaProjectsPort.class), rpaProjectQueuePort);
+        poller = new StatusPoller(rpaProjectLaunchesPort, orchestratorLookup, progressReporter, properties);
         stepRun = new StepRun(1L, 2L);
     }
 

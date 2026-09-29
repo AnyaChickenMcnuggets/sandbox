@@ -6,15 +6,77 @@
 
 ```
 com.rpatest
-├── orchestrator/{auth,client,dto,exception}   # интеграция с Primo RPA Orchestrator
-├── scenario/{domain,repository,service,web}   # CRUD сценариев (наша БД)
-├── execution/{domain,engine,repository,web}   # запуск сценариев, статусы, cleanup
-└── config/                                    # инфраструктурная конфигурация
+├── auth/{domain,repository,service,web,config}  # свои пользователи/роли/JWT (не оркестратор)
+├── orchestrator/{auth,client,dto,exception}      # интеграция с Primo RPA Orchestrator
+├── scenario/{domain,repository,service,web}      # CRUD сценариев (наша БД)
+├── execution/{domain,engine,repository,web}      # запуск сценариев, статусы, cleanup
+└── config/                                       # инфраструктурная конфигурация
 ```
 
 Правило: `orchestrator/*` не знает про `scenario`/`execution` (только HTTP-интеграция).
 `scenario`/`execution` не делают прямых HTTP-вызовов — только через `*Port`-интерфейсы из
-`orchestrator`.
+`orchestrator`. `auth/*` — аутентификация НАШЕГО API, не путать с `orchestrator/auth` (это логин
+В оркестратор, `TokenProvider`/`OrchestratorAuthService` — обслуживает исходящие HTTP-вызовы,
+никак не связан с тем, кто вызывает наш собственный API). См. "Аутентификация и роли" ниже.
+
+## ADR (Architecture Decision Records)
+
+`docs/adr/NNNN-краткое-название.md`, нумерация сквозная (следующий свободный номер), не
+редактируются задним числом (если решение отменено — новый ADR со Status "Superseded by NNNN",
+старый остаётся как есть). Формат: Status/Date, Context (какая проблема, какие альтернативы
+рассматривались и почему отклонены), Decision, Consequences.
+
+**Не для каждого изменения.** ADR пишется только когда решение содержит реальный trade-off или
+отклонённую альтернативу, которую будущий человек/агент иначе переизобретёт и снова отклонит —
+не для рутинного рефакторинга/фичи, у которых и так есть запись в `roadmap.md`. Признак "стоит ли
+писать ADR": если через полгода кто-то спросит "а почему не сделали просто X" — ADR должен уже
+содержать ответ.
+
+Примеры: `docs/adr/0001-canonical-helper-for-duplicated-cross-cutting-logic.md` (почему дублирующаяся
+кросс-cutting логика выносится в один канонический модуль, а не чинится в каждой копии отдельно),
+`docs/adr/0002-split-orchestrator-lookup-and-narration.md` (почему id-резолвинг и текстовое
+форматирование — два модуля, а не один), `docs/adr/0003-own-api-authentication-jwt-rbac.md`
+(механизм аутентификации/роли/провижининг пользователей нашего API).
+
+## Аутентификация и роли
+
+См. ADR 0003 (`docs/adr/0003-own-api-authentication-jwt-rbac.md`) для полного обоснования; здесь —
+что должен знать любой, кто трогает эту область.
+
+- **JWT stateless, не сессия.** Access-токен (HS256, 15 минут, `JwtService`) подписывается и
+  проверяется нашим же сервисом — не хранится в БД, валиден по подписи. Refresh-токен (7 дней) —
+  НЕ JWT, непрозрачный случайный токен, в БД (`refresh_token`) хранится только его SHA-256 хэш
+  (`RefreshTokenService`), с ротацией на каждое обновление (старый отзывается, выдаётся новый).
+  Не путайте это с `orchestrator.auth.*` (`TokenProvider`, `JwtExpiryReader`) — та часть логинится
+  В оркестратор для исходящих вызовов и просто читает `exp` из ЧУЖОГО токена без проверки подписи;
+  здесь — свой токен, свой ключ, обязательна проверка подписи при разборе (`JwtService.parse`).
+- **Матрица доступа — только в `SecurityConfig.securityFilterChain`, не `@PreAuthorize` по
+  контроллерам.** Роль → эндпоинт размечена целиком в одном файле (`authorizeHttpRequests`) —
+  если добавляете новый эндпоинт, впишите его матчер туда, а не аннотацию в контроллер: иначе
+  политика доступа снова расползётся по файлам и её нельзя будет целиком увидеть/проверить. Три
+  роли (`ADMIN`/`OPERATOR`/`VIEWER`, одна на пользователя — enum-колонка на `AppUser`, не M:N):
+  `VIEWER` — только чтение; `OPERATOR` — то же плюс CRUD сценариев (кроме удаления), запуск/
+  остановка прогонов, cleanup; `ADMIN` — то же плюс удаление сценариев и `/api/v1/admin/**`.
+- **Пользователи — только через `AdminUserController` (`ADMIN`-only), self-registration нет.**
+  Первый `ADMIN` заводится `AdminBootstrapRunner` при старте, если `app_user` пуста
+  (`auth.bootstrap-admin.*` в конфиге) — не Flyway-миграцией (реальный пароль не должен становиться
+  содержимым репозитория). Деактивация (`setEnabled(false)`) — мягкая, не удаление (тот же принцип,
+  что `agents.md` требует для истории `scenario`/`step` — см. "Денормализуйте на \*Run..." выше):
+  удаление осиротило бы `ScenarioRun.triggeredBy`. Деактивация и сброс пароля обязаны отзывать все
+  активные refresh-токены пользователя (`RefreshTokenService.revokeAllForUser`) — иначе отключение
+  блокирует только будущий логин, а уже выданные токены продолжают работать.
+- **`ScenarioRun.triggeredBy` — из `Authentication`, никогда из тела запроса.**
+  `RunController.run()` берёт `SecurityContextHolder.getContext().getAuthentication().getName()`;
+  `RunRequest` больше не принимает `triggeredBy` от клиента. Если добавляете новый эндпоинт,
+  которому нужно знать "кто вызвал" — тот же принцип, не доверяйте значению из тела запроса.
+- **`@WebMvcTest`-слайс обязан мокать `JwtService`.** `JwtAuthenticationFilter` — `@Component`,
+  реализующий `Filter`, поэтому автоматически попадает в любой `@WebMvcTest`-слайс независимо от
+  `@AutoConfigureMockMvc(addFilters = false)` (тот отключает РЕГИСТРАЦИЮ фильтра в MockMvc, но не
+  исключает сам бин из контекста) — без `@MockBean JwtService` контекст не поднимется
+  (`UnsatisfiedDependencyException`). Матрица доступа тестируется отдельно, одним файлом
+  (`SecurityConfigAuthorizationTest`, реальный `SecurityConfig`, `@WithMockUser` с разными ролями,
+  фильтры НЕ отключены) — остальные `*ControllerTest` тестируют только HTTP-маппинг/сериализацию
+  с `addFilters = false`, не матрицу доступа.
 
 ## Как добавить новый эндпоинт оркестратора
 
@@ -176,11 +238,19 @@ com.rpatest
   в `architecture.md`) — `"id=1447"` ничего не говорит о том, что происходит. Для `Assignment`
   используйте сгенерированное имя (`assignmentName`, `_<runId>_<stepId>` — оно уже есть, просто
   прокидывайте его в сообщения вместо `assignmentId`), для проекта — `rpaProjectName` из конфига
-  либо, если задан только `rpaProjectId`, best-effort резолвинг имени отдельным вызовом
-  (`RpaProjectsPort.findById`) исключительно для отображения — неудача резолвинга не должна ронять
-  шаг, это не критичный путь. Raw id никуда не девается из ответа API (`orchestratorAssignmentId`
-  и т.п.) — программному клиенту он по-прежнему нужен, но текстовые сообщения для человека им не
-  оперируют.
+  либо, если задан только `rpaProjectId`, best-effort резолвинг имени. Raw id никуда не девается из
+  ответа API (`orchestratorAssignmentId` и т.п.) — программному клиенту он по-прежнему нужен, но
+  текстовые сообщения для человека им не оперируют.
+  **Канонические модули — `OrchestratorLookup` и `OrchestratorNarration`** (ADR 0002,
+  `docs/adr/0002-split-orchestrator-lookup-and-narration.md`). Любое новое "получить id→имя от
+  оркестратора" (проект, и в будущем любая другая сущность) — метод в `OrchestratorLookup`
+  (`execution/engine`, единственный владелец `RpaProjectsPort`/`RpaProjectQueuePort` для этой цели);
+  неудача резолвинга — best-effort, не должна ронять шаг, это не критичный путь. Любое "превратить
+  уже полученные данные в фразу для `StepRun.detail`/ошибки" — метод в `OrchestratorNarration`
+  (`orchestrator/util`, чистые статические функции, без I/O — как `OrchestratorNames`). Не пишите
+  свой `.map(...).orElse("id=" + id)` или конкатенацию строк статуса в новом коде — это тот же
+  паттерн дублирования, ради которого выделен `QueueItemFinder` (см. выше), только для текста, а не
+  для чтения очереди.
 - **Предусловия запуска проверяются один раз, до создания `ScenarioRun`, а не внутри движка.**
   `ExecutionService.requireEnoughFreeRobots` — образец: простая, дешёвая проверка ("хватит ли
   свободных роботов на оркестраторе") выполняется синхронно в `startRun`, до

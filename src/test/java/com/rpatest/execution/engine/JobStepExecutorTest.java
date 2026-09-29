@@ -53,8 +53,9 @@ class JobStepExecutorTest {
         rpaProjectQueuePort = mock(RpaProjectQueuePort.class);
         statusPoller = mock(StatusPoller.class);
         StepProgressReporter progressReporter = new StepProgressReporter(mock(StepRunRepository.class));
-        executor = new JobStepExecutor(assignmentsPort, rpaProjectsPort, rpaProjectVariablesPort,
-                rpaProjectQueuePort, statusPoller, progressReporter, new ObjectMapper());
+        OrchestratorLookup orchestratorLookup = new OrchestratorLookup(rpaProjectsPort, rpaProjectQueuePort);
+        executor = new JobStepExecutor(assignmentsPort, rpaProjectVariablesPort,
+                orchestratorLookup, statusPoller, progressReporter, new ObjectMapper());
     }
 
     @Test

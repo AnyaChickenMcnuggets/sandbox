@@ -9,6 +9,7 @@ import com.rpatest.orchestrator.dto.ExchangeQueueValueDto;
 import com.rpatest.orchestrator.dto.QueueItemDerivedStatus;
 import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.orchestrator.util.OrchestratorNames;
+import com.rpatest.orchestrator.util.OrchestratorNarration;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.time.Duration;
@@ -92,7 +93,8 @@ public class QueueCheckStepExecutor implements StepExecutor {
             // либо (get-or-create) создаёт пустую только чтобы было что поллить, но не "создаёт"
             // её в смысле "это моя очередь, которую можно удалить после прогона".
             progressReporter.report(stepRun, "Очередь '" + queueName + "' (id=" + queue.id()
-                    + ") найдена, начинаю проверку. Ожидается: " + describeExpectation(expected, minTotalCount));
+                    + ") найдена, начинаю проверку. Ожидается: "
+                    + OrchestratorNarration.describeExpectation(expected, minTotalCount));
 
             pollUntilSatisfied(stepRun, queue.id(), queueName, naturalKeyFilter, prefixMatch, expected, minTotalCount,
                     queue.maxRetrayOrZero(), interval, timeout);
@@ -123,7 +125,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
             actualCounts = countByStatus(matching, maxRetray);
             actualTotal = matching.size();
 
-            String actualDescription = describeActual(actualCounts, actualTotal);
+            String actualDescription = OrchestratorNarration.describeActual(actualCounts, actualTotal);
             log.debug("Попытка #{} проверки очереди '{}': {}", attempt, queueName, actualDescription);
             progressReporter.report(stepRun, "Проверка очереди '" + queueName + "' (попытка #" + attempt + "): "
                     + actualDescription);
@@ -134,7 +136,8 @@ public class QueueCheckStepExecutor implements StepExecutor {
             }
             if (Instant.now().isAfter(deadline)) {
                 throw new StepExecutionException("Проверка очереди '" + queueName
-                        + "' не прошла за отведённое время. " + describe(expected, minTotalCount, actualCounts, actualTotal));
+                        + "' не прошла за отведённое время. "
+                        + OrchestratorNarration.describeCheckResult(expected, minTotalCount, actualCounts, actualTotal));
             }
             sleep(interval);
         }
@@ -181,27 +184,6 @@ public class QueueCheckStepExecutor implements StepExecutor {
             }
         }
         return true;
-    }
-
-    private String describeExpectation(Map<String, Integer> expected, Integer minTotalCount) {
-        StringBuilder sb = new StringBuilder();
-        expected.forEach((status, count) -> sb.append(status).append(">=").append(count).append(" "));
-        if (minTotalCount != null) {
-            sb.append("(всего >= ").append(minTotalCount).append(")");
-        }
-        return sb.length() == 0 ? "(без конкретных ожиданий по количеству)" : sb.toString();
-    }
-
-    private String describeActual(Map<String, Long> actualCounts, int actualTotal) {
-        StringBuilder sb = new StringBuilder("всего=").append(actualTotal).append(" ");
-        actualCounts.forEach((status, count) -> sb.append(status).append("=").append(count).append(" "));
-        return sb.toString();
-    }
-
-    private String describe(
-            Map<String, Integer> expected, Integer minTotalCount, Map<String, Long> actualCounts, int actualTotal) {
-        return "Ожидалось: " + describeExpectation(expected, minTotalCount) + " — фактически: "
-                + describeActual(actualCounts, actualTotal);
     }
 
     private void sleep(Duration duration) {

@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rpatest.auth.service.JwtService;
 import com.rpatest.common.exception.NotFoundException;
 import com.rpatest.common.web.GlobalExceptionHandler;
 import com.rpatest.scenario.domain.ScenarioStepType;
@@ -20,12 +21,15 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+// addFilters=false: тестирует HTTP-маппинг/сериализацию, не матрицу доступа (см. SecurityConfigAuthorizationTest)
 @WebMvcTest(controllers = ScenarioController.class)
+@AutoConfigureMockMvc(addFilters = false)
 @org.springframework.context.annotation.Import(GlobalExceptionHandler.class)
 class ScenarioControllerTest {
 
@@ -37,6 +41,11 @@ class ScenarioControllerTest {
 
     @MockBean
     private ScenarioService scenarioService;
+
+    // JwtAuthenticationFilter (Filter-бин) попадает в @WebMvcTest slice даже при addFilters=false —
+    // это отключает его РЕГИСТРАЦИЮ в MockMvc, но не исключает бин из контекста; ему нужен JwtService
+    @MockBean
+    private JwtService jwtService;
 
     @Test
     void createReturnsCreatedScenario() throws Exception {

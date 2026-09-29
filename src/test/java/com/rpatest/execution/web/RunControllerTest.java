@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.rpatest.auth.service.JwtService;
 import com.rpatest.common.exception.ConflictException;
 import com.rpatest.common.exception.NotFoundException;
 import com.rpatest.common.web.GlobalExceptionHandler;
@@ -20,12 +21,20 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+// addFilters=false: тестирует HTTP-маппинг/сериализацию контроллера, не матрицу доступа (та — в
+// SecurityConfigAuthorizationTest); @WithMockUser нужен для RunController.run(), который берёт
+// triggeredBy из Authentication — без него getAuthentication() вернул бы null (NPE), т.к. без
+// фильтров SecurityContext иначе не заполняется.
 @WebMvcTest(controllers = RunController.class)
+@AutoConfigureMockMvc(addFilters = false)
+@WithMockUser(username = "tester")
 @Import(GlobalExceptionHandler.class)
 class RunControllerTest {
 
@@ -38,6 +47,10 @@ class RunControllerTest {
     @MockBean
     private QueueAuditService queueAuditService;
 
+    // JwtAuthenticationFilter (Filter-бин) попадает в @WebMvcTest slice даже при addFilters=false
+    @MockBean
+    private JwtService jwtService;
+
     @Test
     void runReturnsAcceptedWithPendingRun() throws Exception {
         RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.PENDING, null, null, null, List.of());
@@ -48,6 +61,16 @@ class RunControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.scenarioName").value("Test Scenario"));
+    }
+
+    @Test
+    void runDerivesTriggeredByFromAuthenticatedPrincipalNotRequestBody() throws Exception {
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.PENDING, null, null, null, List.of());
+        when(executionService.startRun(eq(5L), eq("tester"), any())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/scenarios/5/run")).andExpect(status().isAccepted());
+
+        org.mockito.Mockito.verify(executionService).startRun(5L, "tester", null);
     }
 
     @Test

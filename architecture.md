@@ -249,12 +249,19 @@ scenario_run 1───* step_run 1───* queue_item_result
   осмысленное) вместо `orchestratorAssignmentId`, и передаёт это имя как "label" в
   `StatusPoller.pollUntilTerminal(stepRun, assignmentId, assignmentLabel)`, который использует его
   во всех своих сообщениях вместо `"id=" + assignmentId`. Имя проекта резолвится для отображения
-  даже когда шаг сконфигурирован через `rpaProjectId` (не `rpaProjectName`) — дополнительным
-  вызовом `RpaProjectsPort.findById` (best-effort: если проект не резолвился, отображается
-  `"id=N"`, но сам шаг не падает — имя нужно только для читаемости статуса). Raw id
-  (`orchestratorAssignmentId`) при этом никуда не пропадает — он по-прежнему есть в
-  `StepRunResponse` для программной работы с оркестратором, просто человекочитаемый `detail` его
-  не использует.
+  даже когда шаг сконфигурирован через `rpaProjectId` (не `rpaProjectName`) — best-effort, через
+  `OrchestratorLookup.resolveProjectLabel` (если проект не резолвился, отображается `"id=N"`, но сам
+  шаг не падает — имя нужно только для читаемости статуса). Raw id (`orchestratorAssignmentId`) при
+  этом никуда не пропадает — он по-прежнему есть в `StepRunResponse` для программной работы с
+  оркестратором, просто человекочитаемый `detail` его не использует.
+  **`OrchestratorLookup`** (`execution/engine`) и **`OrchestratorNarration`** (`orchestrator/util`,
+  ADR 0002) — канонические модули за этим: `OrchestratorLookup` делает вызовы к оркестратору
+  (`resolveProjectId`/`resolveProjectLabel`/`findQueueEntries`, единственный владелец
+  `RpaProjectsPort`/`RpaProjectQueuePort` для целей отображения), `OrchestratorNarration` — чистое
+  форматирование уже полученных данных в текст (`describeRunning`/`describeQueued`/
+  `describeQueueError`/`describeExpectation`/`describeActual`/`describeCheckResult`), без I/O.
+  `StatusPoller`, `JobStepExecutor`, `QueueCheckStepExecutor` все идут через них — до Sprint 25
+  каждый независимо собирал такой текст сам.
 - **`StepProgressReporter`** (`execution/engine/StepProgressReporter.java`) — единая точка входа
   для публикации прогресса: `report(stepRun, "текст")` одним вызовом (1) сохраняет `StepRun.detail`
   в БД и (2) пишет ту же строку в лог на уровне INFO с `step_run`-идентификатором. Все
@@ -329,6 +336,38 @@ scenario_run 1───* step_run 1───* queue_item_result
   зашифрованы Jasypt (`ENC(...)`), реальные секреты передаются через переменные окружения
   (`JASYPT_ENCRYPTOR_PASSWORD` — пароль шифрования, не хранится в репозитории). Токен и пароль
   никогда не пишутся в БД и не логируются (см. `logback`-маскирование в `agents.md`).
+
+## Аутентификация нашего API (не путать с "Аутентификация в оркестраторе" выше)
+
+Раздел выше — как СЕРВИС логинится В оркестратор (исходящие вызовы). Этот раздел — кто может
+вызывать НАШ API (см. ADR 0003, `docs/adr/0003-own-api-authentication-jwt-rbac.md`).
+
+- **JWT stateless.** `POST /api/v1/auth/login` (логин/пароль) → access-токен (HS256, 15 мин,
+  `JwtService`) + refresh-токен (7 дней). Access-токен передаётся `Authorization: Bearer <token>`,
+  проверяется `JwtAuthenticationFilter` на каждом запросе (без обращения к БД — валиден по
+  подписи). `POST /api/v1/auth/refresh` — по refresh-токену выдаёт новую пару (ротация: старый
+  refresh отзывается). `POST /api/v1/auth/logout` — отзывает refresh-токен. Refresh-токен НЕ JWT —
+  случайный токен, в БД (`refresh_token`) хранится только его SHA-256 хэш, не сам токен.
+- **Роли — `ADMIN`/`OPERATOR`/`VIEWER`, одна на пользователя** (`app_user.role`). Матрица доступа
+  вся целиком в `SecurityConfig.securityFilterChain` (`authorizeHttpRequests`):
+
+  | Эндпоинт | VIEWER | OPERATOR | ADMIN |
+  |---|---|---|---|
+  | `GET /scenarios`, `GET /scenarios/{id}`, `GET /runs/**`, `GET /orchestrator/robots-availability` | ✅ | ✅ | ✅ |
+  | `POST/PUT /scenarios/**`, `POST /scenarios/{id}/run`, `POST /runs/{id}/stop`, `POST /scenarios/{id}/cleanup` | ❌ | ✅ | ✅ |
+  | `DELETE /scenarios/{id}` | ❌ | ❌ | ✅ |
+  | `/api/v1/admin/**` | ❌ | ❌ | ✅ |
+
+- **Пользователи — только через `AdminUserController`** (`/api/v1/admin/users`, `ADMIN`-only):
+  создание, список, роль, `enabled`, сброс пароля. Нет self-registration и нет удаления —
+  деактивация (`enabled=false`) вместо удаления (та же причина, что `ON DELETE SET NULL` для
+  `scenario_run`/`step_run`: удаление осиротило бы `ScenarioRun.triggeredBy`). Первый `ADMIN`
+  заводится `AdminBootstrapRunner` при старте, если `app_user` пуста, из
+  `auth.bootstrap-admin.username`/`password` (env, не Flyway).
+- **`ScenarioRun.triggeredBy`** теперь берётся из `Authentication.getName()` в `RunController`, не
+  из тела запроса — клиент не может подставить чужое имя.
+- Секрет подписи (`auth.jwt.secret`) и пароль бутстрап-админа — та же схема, что
+  `orchestrator.credentials.*`: значение из окружения, шифруется Jasypt `ENC(...)` в проде.
 
 ## Отказоустойчивость
 

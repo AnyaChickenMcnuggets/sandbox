@@ -415,6 +415,64 @@ CASCADE` — удаление сценария и без всякого ново
       `fanInStepRunsWhenOtherBranchDoesNotExistInThisRunDueToStartStepId`
 - [x] 176 тестов (было 173), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 25 — Архитектурный ревью: OrchestratorLookup/OrchestratorNarration, ADR-процесс — DONE
+`/mattpocock-skills:improve-codebase-architecture` нашёл дублирование того же вида, ради которого
+в Sprint 23 выделен `QueueItemFinder` — только для id-резолвинга и текста статусов вместо чтения
+очереди. Выбрана кандидатура A из отчёта ревью.
+- [x] `OrchestratorNarration` (новый, `orchestrator/util`) — чистые статические функции
+      "сырые данные оркестратора → фраза для человека" (`describeRunning`, `describeQueued`,
+      `describeQueueError`, `describeExpectation`, `describeActual`, `describeCheckResult`),
+      без I/O, в стиле `OrchestratorNames`
+- [x] `OrchestratorLookup` (новый, `execution/engine`) — единственный владелец
+      `RpaProjectsPort`/`RpaProjectQueuePort` для целей отображения: `resolveProjectId`,
+      `resolveProjectLabel`, `findQueueEntries`. `StatusPoller.describeState` и
+      `JobStepExecutor`(бывший `describeError`) раньше независимо звали
+      `RpaProjectQueuePort.findByAssignment` для одного и того же `assignmentId` — теперь один вызов
+- [x] `JobStepExecutor` лишился двух зависимостей (`RpaProjectsPort`, `RpaProjectQueuePort` →
+      один `OrchestratorLookup`); свои приватные `resolveProjectLabel`/`resolveProjectId`/
+      `describeError` удалены
+- [x] `StatusPoller`, `QueueCheckStepExecutor` переведены на `OrchestratorNarration`, свои приватные
+      `describeExpectation`/`describeActual`/`describe` в `QueueCheckStepExecutor` удалены
+- [x] Тесты: `OrchestratorNarrationTest`, `OrchestratorLookupTest` (новые); `JobStepExecutorTest`/
+      `StatusPollerTest` — конструктор оборачивает моки портов в настоящий `OrchestratorLookup`,
+      как принято в проекте (`ExchangeQueueProvisioner`, `QueueItemFinder`)
+- [x] Введён ADR-процесс (`agents.md`, раздел "ADR"): `docs/adr/0001-...md` (ретроактивно —
+      конвенция канонического хелпера, Sprint 23), `docs/adr/0002-...md` (это решение)
+- [x] 192 теста (было 176), `mvn verify` (JaCoCo) — зелёный
+
+## Sprint 26 — Аутентификация собственного API: JWT + роли + admin API — DONE
+Раньше свой API (11 эндпоинтов) был полностью открыт — авторизация была только к оркестратору.
+Погриллено (`/mattpocock-skills:grilling`) и записано в ADR 0003.
+- [x] `com.rpatest.auth` (новый пакет: `domain`/`repository`/`service`/`web`/`config`) — `AppUser`
+      (роль `ADMIN`/`OPERATOR`/`VIEWER`, `enabled`), `RefreshToken` (хранится только SHA-256 хэш);
+      миграции `V10__app_user.sql`, `V11__refresh_token.sql`
+- [x] `JwtService` — выпуск/проверка access-токена (HS256, 15 мин, `auth.jwt.secret`, Jasypt
+      `ENC(...)`); `RefreshTokenService` — БД-хранимый refresh (7 дней) с ротацией на каждое
+      обновление; `AuthService` компонует оба для login/refresh/logout
+- [x] `POST /api/v1/auth/{login,refresh,logout}` (`AuthController`, публичные)
+- [x] `AdminUserController` (`/api/v1/admin/users`, `ADMIN`-only) — create/list/get/смена роли/
+      enabled/сброс пароля через `AppUserService`; деактивация и сброс пароля отзывают все refresh-
+      токены пользователя (`RefreshTokenService.revokeAllForUser`)
+- [x] `AdminBootstrapRunner` — первый `ADMIN` при старте, если `app_user` пуста
+      (`auth.bootstrap-admin.*`), не через Flyway
+- [x] `SecurityConfig` — вся матрица доступа в одном месте (`authorizeHttpRequests`, не
+      `@PreAuthorize` по контроллерам); все 11 существующих эндпоинтов защищены сразу, не поэтапно
+      (кроме `/actuator/health`/`/actuator/info`)
+- [x] `ScenarioRun.triggeredBy` теперь из `Authentication`, не из тела запроса (`RunRequest`
+      лишился поля `triggeredBy`)
+- [x] Зависимости: `spring-boot-starter-security`, `io.jsonwebtoken:jjwt-*` 0.12.6
+- [x] Тесты: `JwtServiceTest`, `RefreshTokenServiceTest`, `AuthServiceTest`, `AppUserServiceTest`,
+      `AdminBootstrapRunnerTest`, `JwtAuthenticationFilterTest`, `AuthControllerTest`,
+      `AdminUserControllerTest`, `AppUserRepositoryIT`/`RefreshTokenRepositoryIT` (Testcontainers),
+      `SecurityConfigAuthorizationTest` (единственное место, проверяющее саму матрицу доступа —
+      реальный `SecurityConfig`, `@WithMockUser` с разными ролями). Существующие `*ControllerTest`
+      получили `@AutoConfigureMockMvc(addFilters = false)` + `@MockBean JwtService`
+      (`JwtAuthenticationFilter` как `Filter`-бин попадает в `@WebMvcTest`-слайс независимо от
+      `addFilters`)
+- [x] Введён ADR 0003 (`docs/adr/0003-own-api-authentication-jwt-rbac.md`)
+- [x] 251 тест (было 192; `AppUserRepositoryIT`/`RefreshTokenRepositoryIT` не запускались в этой
+      среде — нет Docker, как и ранее `ScenarioStepRepositoryIT`), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

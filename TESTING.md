@@ -8,12 +8,98 @@
 заданы, миграции применились. Подставьте свои `<RPA_PROJECT_ID_1>`, `<RPA_PROJECT_ID_2>` — id
 проектов в оркестраторе (можно любых, включая один и тот же дважды).
 
+**С Sprint 26 весь API, кроме `/actuator/health` и `/api/v1/auth/*`, требует аутентификации.**
+Получите `$TOKEN` в разделе 0b и добавляйте `-H "Authorization: Bearer $TOKEN"` ко ВСЕМ curl-командам
+ниже (в примерах заголовок не повторяется в каждом блоке ради краткости — раз показан в 0b/0c,
+дальше подразумевается). `$TOKEN` — access-токен, живёт 15 минут; если команды из этого файла
+выполняются дольше — получите новый через `POST /api/v1/auth/refresh` (раздел 0c) или залогиньтесь
+заново.
+
 ## 0. Смоук перед стартом
 
 ```bash
 curl -s http://localhost:8080/actuator/health
 ```
-Ожидается `{"status":"UP"}`.
+Ожидается `{"status":"UP"}` (это единственный эндпоинт, не требующий токена, — health-check для
+инфраструктуры).
+
+## 0a. Первый ADMIN и логин
+
+Если `app_user` ещё пуста, `AdminBootstrapRunner` завёл ADMIN при старте из
+`AUTH_BOOTSTRAP_ADMIN_USERNAME`/`AUTH_BOOTSTRAP_ADMIN_PASSWORD` (см. `application.yml`,
+`auth.bootstrap-admin.*`) — если пароль не был задан, в логе при старте предупреждение "первый
+ADMIN не создан", тогда войти будет некому: задайте переменную и перезапустите сервис.
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<пароль из AUTH_BOOTSTRAP_ADMIN_PASSWORD>"}'
+```
+Ожидается `200` и тело `{"accessToken":"...","refreshToken":"...","expiresInSeconds":900}`.
+Сохраните оба значения:
+```bash
+export TOKEN=<accessToken из ответа>
+export REFRESH_TOKEN=<refreshToken из ответа>
+```
+Неверный пароль → `401` с `{"code":"INVALID_CREDENTIALS", ...}`.
+
+## 0b. Роли и матрица доступа
+
+Заведите по одному пользователю каждой роли через admin API (раздел 0c ниже), затем проверьте
+матрицу из `architecture.md`/ADR 0003 — например, с токеном `VIEWER`:
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/scenarios/1/run \
+  -H "Authorization: Bearer $VIEWER_TOKEN"
+```
+Ожидается `403`. С токеном `OPERATOR` тот же запрос — `202` (или `404`/`409`, если сценария с
+таким id нет/уже выполняется — важно, что не `403`). `DELETE /api/v1/scenarios/{id}` с токеном
+`OPERATOR` — `403`, с `ADMIN` — `204`.
+
+## 0c. Admin API (управление пользователями)
+
+Только `ADMIN`. Создание:
+```bash
+curl -s -X POST http://localhost:8080/api/v1/admin/users \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"username":"operator1","password":"password123","role":"OPERATOR"}'
+```
+Сохраните `id` из ответа как `$USER_ID`. Ожидается `201`, тело без `passwordHash`. Повторный
+`POST` с тем же `username` → `409 CONFLICT`. Пароль короче 8 символов → `400`.
+
+```bash
+curl -s http://localhost:8080/api/v1/admin/users -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:8080/api/v1/admin/users/$USER_ID -H "Authorization: Bearer $TOKEN"
+curl -s -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/role \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"role":"ADMIN"}'
+curl -s -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/enabled \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"enabled":false}'
+```
+После `enabled:false` — залогиньтесь под `operator1` (раздел 0a) и убедитесь, что `401`, и что
+refresh-токен, ранее выданный `operator1` (если он успел его получить), тоже больше не работает
+(`POST /api/v1/auth/refresh` с ним → `401`) — деактивация обязана отзывать активные refresh-токены,
+не только блокировать будущий логин.
+
+Сброс пароля:
+```bash
+curl -s -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/password \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"newPassword":"newpass1234"}'
+```
+Ожидается `204`; старый пароль для этого пользователя перестаёт работать на `/auth/login`.
+
+## 0d. Refresh и logout
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/auth/refresh \
+  -H "Content-Type: application/json" -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}"
+```
+Ожидается `200`, новая пара токенов; повторный вызов с ТЕМ ЖЕ (уже использованным) `$REFRESH_TOKEN`
+должен дать `401` — ротация отзывает refresh-токен сразу при использовании.
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/auth/logout \
+  -H "Content-Type: application/json" -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}" -w "\n%{http_code}\n"
+```
+Ожидается `204`; повторный `refresh` с этим токеном после `logout` — `401`.
 
 ## 1. CRUD сценария (без обращений к оркестратору)
 
@@ -671,3 +757,17 @@ curl -s http://localhost:8080/api/v1/orchestrator/robots-availability
 - [ ] Fan-in (раздел 2c): узел с двумя независимыми родителями выполняется один раз, только после
       успеха обоих; при падении одного родителя остаётся `PENDING`; при запуске с `startStepId`
       родитель вне этого прогона не блокирует узел ожиданием
+- [ ] Без токена (или с истёкшим/невалидным) — `401` на любом эндпоинте, кроме `/actuator/health` и
+      `/api/v1/auth/*` — раздел 0
+- [ ] Матрица ролей соблюдается: `VIEWER` — только чтение (`403` на запись); `OPERATOR` — чтение и
+      операционные действия, но `403` на `DELETE /scenarios/{id}` и на `/api/v1/admin/**`; `ADMIN` —
+      всё — раздел 0b
+- [ ] `/api/v1/admin/users` доступен только `ADMIN` (`403` для остальных ролей); дубликат
+      `username` — `409`; короткий пароль — `400` — раздел 0c
+- [ ] Деактивация пользователя (`enabled:false`) блокирует и логин, и уже выданный refresh-токен
+      (не только будущий логин) — раздел 0c
+- [ ] Refresh-токен одноразовый (ротация): повторное использование того же токена после успешного
+      `/auth/refresh` — `401`; `logout` тоже делает токен непригодным — раздел 0d
+- [ ] `ScenarioRun.triggeredBy` в ответе `GET /api/v1/runs/{runId}` — имя реально залогиненного
+      пользователя, а не то, что можно было бы подставить в теле запроса (в `RunRequest` такого поля
+      больше нет)

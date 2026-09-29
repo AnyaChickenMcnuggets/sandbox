@@ -5,6 +5,7 @@ import com.rpatest.execution.service.QueueAuditService;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,8 +26,8 @@ public class RunController {
 
     @PostMapping("/api/v1/scenarios/{scenarioId}/run")
     public ResponseEntity<RunResponse> run(@PathVariable Long scenarioId, @RequestBody(required = false) RunRequest request) {
-        String triggeredBy = request != null ? request.triggeredBy() : null;
         Long startStepId = request != null ? request.startStepId() : null;
+        String triggeredBy = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(executionService.startRun(scenarioId, triggeredBy, startStepId));
     }

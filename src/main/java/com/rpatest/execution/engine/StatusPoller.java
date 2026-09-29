@@ -3,9 +3,8 @@ package com.rpatest.execution.engine;
 import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.orchestrator.client.RpaProjectLaunchesPort;
-import com.rpatest.orchestrator.client.RpaProjectQueuePort;
-import com.rpatest.orchestrator.dto.QueueItemProjectDto;
 import com.rpatest.orchestrator.dto.RpaProjectLaunchDto;
+import com.rpatest.orchestrator.util.OrchestratorNarration;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
@@ -29,17 +28,17 @@ public class StatusPoller {
     private static final Logger log = LoggerFactory.getLogger(StatusPoller.class);
 
     private final RpaProjectLaunchesPort rpaProjectLaunchesPort;
-    private final RpaProjectQueuePort rpaProjectQueuePort;
+    private final OrchestratorLookup orchestratorLookup;
     private final StepProgressReporter progressReporter;
     private final OrchestratorProperties properties;
 
     public StatusPoller(
             RpaProjectLaunchesPort rpaProjectLaunchesPort,
-            RpaProjectQueuePort rpaProjectQueuePort,
+            OrchestratorLookup orchestratorLookup,
             StepProgressReporter progressReporter,
             OrchestratorProperties properties) {
         this.rpaProjectLaunchesPort = rpaProjectLaunchesPort;
-        this.rpaProjectQueuePort = rpaProjectQueuePort;
+        this.orchestratorLookup = orchestratorLookup;
         this.progressReporter = progressReporter;
         this.properties = properties;
     }
@@ -73,14 +72,9 @@ public class StatusPoller {
 
     private String describeState(int assignmentId, RpaProjectLaunchDto latest) {
         if (latest != null) {
-            return "выполняется на роботе '" + latest.robotName() + "' (начато " + latest.robotStartedAt() + ")";
+            return OrchestratorNarration.describeRunning(latest);
         }
-        List<QueueItemProjectDto> queued = rpaProjectQueuePort.findByAssignment(assignmentId);
-        if (!queued.isEmpty()) {
-            return "в очереди проектов оркестратора (поставлено " + queued.get(0).createdAt()
-                    + "), ожидание свободного робота";
-        }
-        return "не найдено ни в очереди проектов, ни среди запусков на роботах";
+        return OrchestratorNarration.describeQueued(orchestratorLookup.findQueueEntries(assignmentId));
     }
 
     private RpaProjectLaunchDto latestLaunch(List<RpaProjectLaunchDto> launches) {

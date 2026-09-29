@@ -21,6 +21,20 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+auth:
+  jwt:
+    # HS256 ключ подписи — минимум 32 байта, иначе JwtService откажет при старте (см. ADR 0003).
+    # Как и с orchestrator.credentials, реальное значение — ТОЛЬКО через переменную окружения в
+    # проде/стейджинге, дефолт годится лишь для локальной разработки.
+    secret: ${AUTH_JWT_SECRET:local-dev-only-change-me-32-bytes-minimum}
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+  bootstrap-admin:
+    # Первый ADMIN создаётся при старте, если app_user пуста (см. AdminBootstrapRunner). Пустой
+    # пароль — бутстрап пропускается (в лог уходит предупреждение), войти будет некому.
+    username: ${AUTH_BOOTSTRAP_ADMIN_USERNAME:admin}
+    password: ${AUTH_BOOTSTRAP_ADMIN_PASSWORD:}
+
 orchestrator:
   base-url: ${ORCHESTRATOR_BASE_URL:http://localhost:8090}
   credentials:
