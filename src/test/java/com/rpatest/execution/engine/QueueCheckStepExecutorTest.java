@@ -287,6 +287,76 @@ class QueueCheckStepExecutorTest {
     }
 
     @Test
+    void exitsEarlyWhenAllTrackedTransactionsReachStableTerminalStatus() {
+        // k1 уже SUCCESS и никогда не станет ещё раз SUCCESS (expectedStatusCounts требует 5) —
+        // ждать полный timeout бессмысленно, должны упасть после одного подтверждающего опроса
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "k1", false)).thenReturn(
+                ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of(
+                "queueName", "q",
+                "naturalKeys", List.of("k1"),
+                "expectedStatusCounts", Map.of("SUCCESS", 5)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("уже получили конечный статус");
+
+        // один опрос, показавший "всё конечное и недостаточно", + один подтверждающий — не 15,
+        // которые набежали бы за timeout=150ms/interval=10ms без досрочного выхода
+        verify(exchangeQueuesPort, org.mockito.Mockito.times(2)).listItems(queueId, 0, 200, "k1", false);
+    }
+
+    @Test
+    void doesNotExitEarlyWhenWatchingWholeQueueWithoutNaturalKeys() {
+        // без naturalKeys (watch всей очереди через minTotalCount) список не закрыт — новые
+        // транзакции могут появиться в любой момент, поэтому "все текущие уже конечные" не повод
+        // переставать ждать — должны честно досидеть до timeout, как раньше
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
+                item("k1", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 5));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step))
+                .isInstanceOf(StepExecutionException.class)
+                .hasMessageContaining("не прошла за отведённое время");
+
+        verify(exchangeQueuesPort, org.mockito.Mockito.atLeast(5)).listItems(queueId, 0, 200);
+    }
+
+    @Test
+    void doesNotExitEarlyWhenNewTrackedTransactionAppearsBetweenPolls() {
+        // k2 появляется только со второго опроса — первая "стабильная" пара (1-й и 2-й опрос)
+        // размер набора не совпадает, значит это НЕ стабильная картина, fail-fast не срабатывает
+        // раньше, чем набор дважды подряд не поменяется
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "tx-", true))
+                .thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("tx-1", ExchangeQueueValueEventType.SUCCESS))))
+                .thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
+                        item("tx-1", ExchangeQueueValueEventType.SUCCESS), item("tx-2", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of(
+                "queueName", "q",
+                "naturalKeys", List.of("tx-"),
+                "naturalKeyPrefixMatch", true,
+                "expectedStatusCounts", Map.of("SUCCESS", 5)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
+
+        // опрос #1 (1 шт.) → #2 (2 шт., размер изменился — не fail-fast, сброс) → #3 (снова 2 шт.,
+        // стабильно повторилось — fail-fast); итого 3, не 15 от честного timeout
+        verify(exchangeQueuesPort, org.mockito.Mockito.times(3)).listItems(queueId, 0, 200, "tx-", true);
+    }
+
+    @Test
     void wrapsOrchestratorApiException() {
         when(exchangeQueuesPort.findByName("q")).thenThrow(new OrchestratorApiException("boom"));
 

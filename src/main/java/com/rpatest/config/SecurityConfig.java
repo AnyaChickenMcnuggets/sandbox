@@ -49,6 +49,13 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // CSRF отключён намеренно (ADR 0004), не по умолчанию "забыли": токены лежат в
+                // куках с SameSite=Strict — браузер физически не приложит их к запросу с чужого
+                // origin (ни через form-submit, ни через fetch/XHR), классический CSRF-вектор для
+                // такого cookie не существует. Авторизационный заголовок (curl/скрипты, см.
+                // JwtAuthenticationFilter) тоже не уязвим — его не поставить без явного JS на том
+                // же origin, что уже не CSRF, а XSS. Если когда-нибудь появится необходимость
+                // отправлять куки cross-site (SameSite=None) — ОБЯЗАТЕЛЬНО включить CSRF обратно.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(eh -> eh

@@ -43,9 +43,12 @@ class ScenarioControllerTest {
     private ScenarioService scenarioService;
 
     // JwtAuthenticationFilter (Filter-бин) попадает в @WebMvcTest slice даже при addFilters=false —
-    // это отключает его РЕГИСТРАЦИЮ в MockMvc, но не исключает бин из контекста; ему нужен JwtService
+    // это отключает его РЕГИСТРАЦИЮ в MockMvc, но не исключает бин из контекста; ему нужны оба
     @MockBean
     private JwtService jwtService;
+
+    @MockBean
+    private com.rpatest.auth.web.AuthCookies authCookies;
 
     @Test
     void createReturnsCreatedScenario() throws Exception {

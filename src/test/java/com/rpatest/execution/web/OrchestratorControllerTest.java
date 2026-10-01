@@ -29,6 +29,9 @@ class OrchestratorControllerTest {
     @MockBean
     private JwtService jwtService;
 
+    @MockBean
+    private com.rpatest.auth.web.AuthCookies authCookies;
+
     @Test
     void robotsAvailabilityReturnsSnapshotFromService() throws Exception {
         when(executionService.getRobotAvailability())
