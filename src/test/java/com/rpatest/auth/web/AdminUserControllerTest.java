@@ -47,6 +47,9 @@ class AdminUserControllerTest {
     @MockBean
     private JwtService jwtService;
 
+    @MockBean
+    private AuthCookies authCookies;
+
     @Test
     void createReturnsCreatedUser() throws Exception {
         AppUser user = user(1L, "alice", Role.OPERATOR);

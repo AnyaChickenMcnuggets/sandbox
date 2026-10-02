@@ -51,6 +51,9 @@ class RunControllerTest {
     @MockBean
     private JwtService jwtService;
 
+    @MockBean
+    private com.rpatest.auth.web.AuthCookies authCookies;
+
     @Test
     void runReturnsAcceptedWithPendingRun() throws Exception {
         RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.PENDING, null, null, null, List.of());

@@ -8,6 +8,7 @@ public class AuthProperties {
 
     private Jwt jwt = new Jwt();
     private BootstrapAdmin bootstrapAdmin = new BootstrapAdmin();
+    private Cookies cookies = new Cookies();
 
     public Jwt getJwt() {
         return jwt;
@@ -23,6 +24,14 @@ public class AuthProperties {
 
     public void setBootstrapAdmin(BootstrapAdmin bootstrapAdmin) {
         this.bootstrapAdmin = bootstrapAdmin;
+    }
+
+    public Cookies getCookies() {
+        return cookies;
+    }
+
+    public void setCookies(Cookies cookies) {
+        this.cookies = cookies;
     }
 
     public static class Jwt {
@@ -78,6 +87,21 @@ public class AuthProperties {
 
         public void setPassword(String password) {
             this.password = password;
+        }
+    }
+
+    public static class Cookies {
+        /** `Secure` требует HTTPS — браузер не отправит такую куку обратно по обычному http.
+         * `false` — ТОЛЬКО для локальной разработки без TLS (см. ADR 0004); в проде/стейджинге
+         * всегда `true` (дефолт), иначе куки с токенами не защищены от перехвата. */
+        private boolean secure = true;
+
+        public boolean isSecure() {
+            return secure;
+        }
+
+        public void setSecure(boolean secure) {
+            this.secure = secure;
         }
     }
 }

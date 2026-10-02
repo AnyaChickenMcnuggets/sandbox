@@ -8,12 +8,18 @@
 заданы, миграции применились. Подставьте свои `<RPA_PROJECT_ID_1>`, `<RPA_PROJECT_ID_2>` — id
 проектов в оркестраторе (можно любых, включая один и тот же дважды).
 
-**С Sprint 26 весь API, кроме `/actuator/health` и `/api/v1/auth/*`, требует аутентификации.**
-Получите `$TOKEN` в разделе 0b и добавляйте `-H "Authorization: Bearer $TOKEN"` ко ВСЕМ curl-командам
-ниже (в примерах заголовок не повторяется в каждом блоке ради краткости — раз показан в 0b/0c,
-дальше подразумевается). `$TOKEN` — access-токен, живёт 15 минут; если команды из этого файла
-выполняются дольше — получите новый через `POST /api/v1/auth/refresh` (раздел 0c) или залогиньтесь
-заново.
+**С Sprint 26 весь API, кроме `/actuator/health` и `/api/v1/auth/*`, требует аутентификации.** С
+Sprint 27 токены лежат в `HttpOnly`-куках, не в теле ответа (ADR 0004) — curl получает их через
+`-c <файл>` (сохранить куки из ответа) и прикладывает через `-b <файл>` (отправить куки). Используйте
+отдельный файл-куки на роль, когда нужно сравнивать поведение нескольких ролей одновременно (раздел
+0b) — `-c`/`-b` на один и тот же файл перезатирают его на каждый логин. Ниже подразумевается файл
+`cookies.txt`, добавляйте `-b cookies.txt` ко ВСЕМ командам после `0a` (в примерах не повторяется
+ради краткости). Access-токен в куке живёт 15 минут; если команды из этого файла выполняются
+дольше — `POST /api/v1/auth/refresh -b cookies.txt -c cookies.txt` обновит куки на месте (ротация),
+либо залогиньтесь заново. По умолчанию (`auth.cookies.secure=true`) кука `Secure` — curl по
+`http://localhost` её всё равно примет и пришлёт назад (curl не проверяет `Secure` так строго, как
+браузер), но у РЕАЛЬНОГО браузерного фронта `Secure`-кука без HTTPS работать не будет — см.
+`HTTPS_SETUP.md`.
 
 ## 0. Смоук перед стартом
 
@@ -31,75 +37,91 @@ curl -s http://localhost:8080/actuator/health
 ADMIN не создан", тогда войти будет некому: задайте переменную и перезапустите сервис.
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/auth/login \
+curl -s -c cookies.txt -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"<пароль из AUTH_BOOTSTRAP_ADMIN_PASSWORD>"}'
 ```
-Ожидается `200` и тело `{"accessToken":"...","refreshToken":"...","expiresInSeconds":900}`.
-Сохраните оба значения:
+Ожидается `200` и тело `{"expiresInSeconds":900}` — токенов в теле больше нет, они ушли в
+`Set-Cookie` и сохранены в `cookies.txt` (`-c`). Проверить, что куки реально сохранились:
 ```bash
-export TOKEN=<accessToken из ответа>
-export REFRESH_TOKEN=<refreshToken из ответа>
+grep -E "access_token|refresh_token" cookies.txt
 ```
 Неверный пароль → `401` с `{"code":"INVALID_CREDENTIALS", ...}`.
 
+Узнать, под кем залогинены (и какая роль — фронт использует это для UI-гейтинга, Sprint 28):
+```bash
+curl -s -b cookies.txt http://localhost:8080/api/v1/auth/me
+```
+Ожидается `200`, `{"username":"admin","role":"ADMIN"}`. Без куки (или с протухшей) — `401`. Любая
+роль, не только `ADMIN`, должна получать `200` на этот эндпоинт — попробуйте тем же `-b` с
+файлом-кукой от `VIEWER`-пользователя (раздел 0b), тоже `200`, просто `"role":"VIEWER"`.
+
+Дальше во всех примерах файла — `-b cookies.txt` там, где нужен доступ под этим пользователем.
+
 ## 0b. Роли и матрица доступа
 
-Заведите по одному пользователю каждой роли через admin API (раздел 0c ниже), затем проверьте
-матрицу из `architecture.md`/ADR 0003 — например, с токеном `VIEWER`:
+Заведите по одному пользователю каждой роли через admin API (раздел 0c ниже), залогиньте каждого в
+СВОЙ файл-куки (`-c cookies-viewer.txt`, `-c cookies-operator.txt`, `-c cookies-admin.txt`), затем
+проверьте матрицу из `architecture.md`/ADR 0003 — например:
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/scenarios/1/run \
-  -H "Authorization: Bearer $VIEWER_TOKEN"
+  -b cookies-viewer.txt
 ```
-Ожидается `403`. С токеном `OPERATOR` тот же запрос — `202` (или `404`/`409`, если сценария с
-таким id нет/уже выполняется — важно, что не `403`). `DELETE /api/v1/scenarios/{id}` с токеном
-`OPERATOR` — `403`, с `ADMIN` — `204`.
+Ожидается `403`. С `cookies-operator.txt` тот же запрос — `202` (или `404`/`409`, если сценария с
+таким id нет/уже выполняется — важно, что не `403`). `DELETE /api/v1/scenarios/{id}` с
+`cookies-operator.txt` — `403`, с `cookies-admin.txt` — `204`.
 
 ## 0c. Admin API (управление пользователями)
 
-Только `ADMIN`. Создание:
+Только `ADMIN` (`-b cookies-admin.txt` или `cookies.txt` из 0a, если логинились под admin). Создание:
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/admin/users \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+curl -s -b cookies.txt -X POST http://localhost:8080/api/v1/admin/users \
+  -H "Content-Type: application/json" \
   -d '{"username":"operator1","password":"password123","role":"OPERATOR"}'
 ```
 Сохраните `id` из ответа как `$USER_ID`. Ожидается `201`, тело без `passwordHash`. Повторный
 `POST` с тем же `username` → `409 CONFLICT`. Пароль короче 8 символов → `400`.
 
 ```bash
-curl -s http://localhost:8080/api/v1/admin/users -H "Authorization: Bearer $TOKEN"
-curl -s http://localhost:8080/api/v1/admin/users/$USER_ID -H "Authorization: Bearer $TOKEN"
-curl -s -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/role \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"role":"ADMIN"}'
-curl -s -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/enabled \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"enabled":false}'
+curl -s -b cookies.txt http://localhost:8080/api/v1/admin/users
+curl -s -b cookies.txt http://localhost:8080/api/v1/admin/users/$USER_ID
+curl -s -b cookies.txt -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/role \
+  -H "Content-Type: application/json" -d '{"role":"ADMIN"}'
+curl -s -b cookies.txt -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/enabled \
+  -H "Content-Type: application/json" -d '{"enabled":false}'
 ```
-После `enabled:false` — залогиньтесь под `operator1` (раздел 0a) и убедитесь, что `401`, и что
-refresh-токен, ранее выданный `operator1` (если он успел его получить), тоже больше не работает
-(`POST /api/v1/auth/refresh` с ним → `401`) — деактивация обязана отзывать активные refresh-токены,
-не только блокировать будущий логин.
+После `enabled:false` — залогиньтесь под `operator1` в отдельный `cookies-operator.txt` (раздел 0a)
+и убедитесь, что `401`, и что его refresh-кука (если он успел залогиниться раньше отключения) тоже
+больше не работает (`POST /api/v1/auth/refresh -b cookies-operator.txt` → `401`) — деактивация
+обязана отзывать активные refresh-токены, не только блокировать будущий логин.
 
 Сброс пароля:
 ```bash
-curl -s -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/password \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"newPassword":"newpass1234"}'
+curl -s -b cookies.txt -X PUT http://localhost:8080/api/v1/admin/users/$USER_ID/password \
+  -H "Content-Type: application/json" -d '{"newPassword":"newpass1234"}'
 ```
 Ожидается `204`; старый пароль для этого пользователя перестаёт работать на `/auth/login`.
 
 ## 0d. Refresh и logout
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/auth/refresh \
-  -H "Content-Type: application/json" -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}"
+curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8080/api/v1/auth/refresh
 ```
-Ожидается `200`, новая пара токенов; повторный вызов с ТЕМ ЖЕ (уже использованным) `$REFRESH_TOKEN`
-должен дать `401` — ротация отзывает refresh-токен сразу при использовании.
+`-b` отправляет текущий refresh из куки, `-c` перезаписывает файл новой парой (ротация). Ожидается
+`200`, `{"expiresInSeconds":900}`. Повторный вызов с файлом-копией, снятой ДО этого рефреша (т.е. со
+старым, уже использованным refresh-токеном), должен дать `401` — ротация отзывает refresh-токен
+сразу при использовании:
+```bash
+cp cookies.txt cookies-before-refresh.txt   # снять копию перед следующим refresh, для этой проверки
+curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8080/api/v1/auth/refresh
+curl -s -o /dev/null -w "%{http_code}\n" -b cookies-before-refresh.txt \
+  -X POST http://localhost:8080/api/v1/auth/refresh   # ожидается 401 — токен уже заменён
+```
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/auth/logout \
-  -H "Content-Type: application/json" -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}" -w "\n%{http_code}\n"
+curl -s -b cookies.txt -X POST http://localhost:8080/api/v1/auth/logout -w "\n%{http_code}\n"
 ```
-Ожидается `204`; повторный `refresh` с этим токеном после `logout` — `401`.
+Ожидается `204`; повторный `refresh` с `cookies.txt` после `logout` — `401`.
 
 ## 1. CRUD сценария (без обращений к оркестратору)
 
@@ -314,6 +336,18 @@ SUCCESS>=99 — фактически: всего=1 SUCCESS=1 ...". Вернит�
 если реально успешных транзакций больше) — шаг должен пройти `SUCCEEDED`, а не упасть из-за того,
 что фактическое количество "не совпало" с ожидаемым. До Sprint 22 это было строгое равенство, и
 лишняя транзакция сверх ожидания роняла бы проверку.
+
+Проверка досрочного выхода (Sprint 27): укажите в `checkInput.config` заведомо недостижимое
+`expectedStatusCounts` (как в проверке выше, `{"SUCCESS": 99}`) ПРИ этом с непустым `naturalKeys`
+(раздел 2, `checkInput` уже проверяет точным совпадением по `naturalKeys` — так и оставьте). Если
+`tx-1` реально уже в конечном статусе (`SUCCESS`/`ERROR` без оставшихся повторов) — шаг должен
+упасть заметно быстрее `orchestrator.queue-check-polling.timeout` (по умолчанию 10 минут), не
+дожидаясь полного таймаута: в сообщении об ошибке вместо "не прошла за отведённое время" будет "все
+отслеживаемые транзакции уже получили конечный статус, который не изменится". Сравните время до
+ошибки с разделом выше (заведомо недостижимые ожидания без этого ускорения) — разница должна быть
+заметной (секунды/десятки секунд вместо минут, в зависимости от `pollIntervalSeconds`). Если вместо
+`naturalKeys` используется только `minTotalCount` (проверка всей очереди) — это ускорение НЕ должно
+срабатывать, шаг обязан честно ждать полный `timeout`, т.к. набор элементов там не закрыт.
 
 ### 2c. Fan-in (два независимых шага сводятся в один общий, Sprint 24)
 
@@ -771,3 +805,13 @@ curl -s http://localhost:8080/api/v1/orchestrator/robots-availability
 - [ ] `ScenarioRun.triggeredBy` в ответе `GET /api/v1/runs/{runId}` — имя реально залогиненного
       пользователя, а не то, что можно было бы подставить в теле запроса (в `RunRequest` такого поля
       больше нет)
+- [ ] `/auth/login`/`/auth/refresh` не возвращают `accessToken`/`refreshToken` в JSON-теле (только
+      `expiresInSeconds`) — токены только в `Set-Cookie`, `HttpOnly`+`Secure`+`SameSite=Strict` —
+      раздел 0a
+- [ ] `/auth/refresh`/`/auth/logout` без куки с refresh-токеном (не было логина, либо кука не
+      приложена) — `401`/`INVALID_CREDENTIALS`, не 500 и не "тихий" успех — раздел 0a/0d
+- [ ] Досрочный выход `QUEUE_CHECK` при непустом `naturalKeys`, если все отслеживаемые транзакции
+      уже в конечном статусе — падает заметно раньше `timeout`, не дожидаясь его полностью; без
+      `naturalKeys` (только `minTotalCount`) — честно ждёт `timeout`, как раньше — раздел 2b
+- [ ] `GET /api/v1/auth/me` возвращает `username`/`role` текущего пользователя, доступен любой
+      аутентифицированной роли (не только `ADMIN`/`OPERATOR`); без куки/с протухшей — `401` — раздел 0a

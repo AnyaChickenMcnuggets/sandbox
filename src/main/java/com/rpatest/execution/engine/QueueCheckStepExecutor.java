@@ -119,6 +119,15 @@ public class QueueCheckStepExecutor implements StepExecutor {
         Map<String, Long> actualCounts;
         int actualTotal;
         int attempt = 0;
+        // Если все транзакции, отслеживаемые по naturalKeyFilter, уже застыли в конечном статусе
+        // (не NEW/IN_PROGRESS) и этого всё ещё недостаточно — дальше ждать нечего, статус сам по
+        // себе больше не поменяется (см. stableUnsatisfiedTerminalCount ниже). Не рубим по первому
+        // же такому снимку — реально ещё один опрос (на случай, если список вот-вот пополнится
+        // новой транзакцией с тем же префиксом/роботом) и только если СЛЕДУЮЩИЙ снимок повторяет ту
+        // же картину (тот же набор, всё так же конечное и всё так же недостаточно) — fail fast
+        // вместо ожидания оставшегося timeout впустую.
+        boolean previousAttemptWasStableTerminalAndUnsatisfied = false;
+        int previousMatchedTotal = -1;
         while (true) {
             attempt++;
             List<ExchangeQueueValueDto> matching = queueItemFinder.find(queueId, naturalKeyFilter, prefixMatch);
@@ -134,6 +143,20 @@ public class QueueCheckStepExecutor implements StepExecutor {
                 progressReporter.report(stepRun, "Проверка очереди '" + queueName + "' пройдена: " + actualDescription);
                 return;
             }
+
+            boolean allTerminalNow = !naturalKeyFilter.isEmpty() && isAllTerminal(matching, maxRetray);
+            if (allTerminalNow && previousAttemptWasStableTerminalAndUnsatisfied && actualTotal == previousMatchedTotal) {
+                progressReporter.report(stepRun, "Проверка очереди '" + queueName
+                        + "' прекращена досрочно: все отслеживаемые транзакции (" + actualTotal
+                        + ") уже в конечном статусе, дальнейшее ожидание бессмысленно");
+                throw new StepExecutionException("Проверка очереди '" + queueName
+                        + "' не пройдена: все отслеживаемые транзакции уже получили конечный статус, "
+                        + "который не изменится. " + OrchestratorNarration.describeCheckResult(
+                                expected, minTotalCount, actualCounts, actualTotal));
+            }
+            previousAttemptWasStableTerminalAndUnsatisfied = allTerminalNow;
+            previousMatchedTotal = actualTotal;
+
             if (Instant.now().isAfter(deadline)) {
                 throw new StepExecutionException("Проверка очереди '" + queueName
                         + "' не прошла за отведённое время. "
@@ -162,6 +185,19 @@ public class QueueCheckStepExecutor implements StepExecutor {
             return QueueItemDerivedStatus.IN_PROGRESS;
         }
         return status;
+    }
+
+    /** {@code true}, если ни одна из переданных транзакций не может ещё сменить статус сама по
+     * себе (нет ни {@code NEW}, ни {@code IN_PROGRESS}/недоисчерпанного {@code ERROR}) — пустой
+     * список НЕ считается "всё готово": транзакции могли просто ещё не появиться в очереди. */
+    private boolean isAllTerminal(List<ExchangeQueueValueDto> items, int maxRetray) {
+        if (items.isEmpty()) {
+            return false;
+        }
+        return items.stream().allMatch(item -> {
+            QueueItemDerivedStatus status = effectiveStatus(item, maxRetray);
+            return status != QueueItemDerivedStatus.NEW && status != QueueItemDerivedStatus.IN_PROGRESS;
+        });
     }
 
     /**

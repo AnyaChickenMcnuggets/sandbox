@@ -473,6 +473,53 @@ CASCADE` — удаление сценария и без всякого ново
 - [x] 251 тест (было 192; `AppUserRepositoryIT`/`RefreshTokenRepositoryIT` не запускались в этой
       среде — нет Docker, как и ранее `ScenarioStepRepositoryIT`), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 27 — Токены в secure-куках + HTTPS, досрочный выход QUEUE_CHECK — DONE
+Пользователь: токены в JSON-теле — читаемы/подменяемы через localStorage/JS; запихнуть в secure
+куки и включить HTTPS (или дать инструкцию). Плюс: `QUEUE_CHECK` зря досиживает полный timeout,
+когда все отслеживаемые по фильтру транзакции уже в конечном статусе и больше не изменятся.
+- [x] `AuthCookies` (новый, `auth/web`) — единственный владелец построения/чтения/очистки
+      `access_token` (`Path=/`) и `refresh_token` (`Path=/api/v1/auth`), оба `HttpOnly`+`Secure`+
+      `SameSite=Strict`. `TokenResponse` лишился `accessToken`/`refreshToken` (только
+      `expiresInSeconds`); `RefreshRequest` удалён — `/refresh`/`/logout` читают токен из куки
+- [x] `JwtAuthenticationFilter` — сначала кука, fallback `Authorization: Bearer` (curl/тесты)
+- [x] `auth.cookies.secure` (`AUTH_COOKIES_SECURE`, дефолт `true`) — `false` только для локальной
+      разработки без TLS
+- [x] `server.forward-headers-strategy: framework` в `application.yml` + закомментированный шаблон
+      `server.ssl.*` — для варианта "TLS прямо в приложении"
+- [x] `HTTPS_SETUP.md` (новый) — инструкция: TLS на реверс-прокси (рекомендуется) или напрямую в
+      Spring Boot, локальная разработка без TLS, предупреждение про `SameSite=Strict` и
+      кросс-origin фронт
+- [x] CSRF сознательно не включён — обоснование в ADR 0004 (опора на `SameSite=Strict`)
+- [x] `QueueCheckStepExecutor.pollUntilSatisfied` — досрочный `StepExecutionException`, если при
+      непустом `naturalKeys` все найденные транзакции в конечном статусе (`isAllTerminal`) и это
+      повторилось два опроса подряд (один подтверждающий, на случай появления новой транзакции с
+      тем же ключом/префиксом между опросами) — не ждёт оставшийся `timeout` впустую. Без
+      `naturalKeys` (проверка всей очереди) правило не действует — набор не закрыт
+- [x] Введён ADR 0004 (`docs/adr/0004-cookie-based-tokens-and-https.md`)
+- [x] Тесты: `AuthCookiesTest` (новый); `JwtAuthenticationFilterTest`/`AuthControllerTest`
+      переписаны под куки; `QueueCheckStepExecutorTest` — 3 новых (досрочный выход, НЕ досрочный
+      выход без `naturalKeys`, сброс "стабильности" при появлении новой транзакции между опросами)
+- [x] `FRONTEND_INTEGRATION.md` обновлён под куки (см. ниже в этом же спринте — вместо хранения
+      токенов фронт просто ничего не делает, браузер прикладывает куку сам)
+- [x] 265 тестов (было 251), `mvn verify` (JaCoCo) — зелёный
+
+## Sprint 28 — GET /api/v1/auth/me (роль для фронта без декодирования JWT) — DONE
+Прямое следствие Sprint 27: токен в `HttpOnly`-куке, фронт спросил, как теперь узнать роль.
+- [x] `AuthController.me()` — `GET /api/v1/auth/me` → `{"username", "role"}`, роль берётся из
+      `GrantedAuthority` текущего `Authentication`, без похода в БД
+- [x] Доступен любой аутентифицированной роли — не размечен под конкретную роль в
+      `SecurityConfig`, просто попадает под общее `anyRequest().authenticated()`
+- [x] По пути выявлена и задокументирована ловушка: `Authentication` как параметр метода
+      контроллера резолвится через `HttpServletRequest.getUserPrincipal()`, который заполняет сам
+      фильтр-чейн — в `@WebMvcTest` с `addFilters=false` параметр приходит `null` даже под
+      `@WithMockUser` (тот пишет прямо в `SecurityContextHolder`, не трогает фильтры). Исправлено
+      на `SecurityContextHolder.getContext().getAuthentication()` внутри метода — как уже делал
+      `RunController`; задокументировано в `agents.md`, чтобы не наступить снова
+- [x] Тесты: `AuthControllerTest` (2, мэппинг username/role), `SecurityConfigAuthorizationTest` (2 —
+      401 без аутентификации, 200 для VIEWER — самой слабой роли, подтверждает "не role-gated")
+- [x] `FRONTEND_INTEGRATION.md` обновлён — новый раздел с примером запроса/ответа
+- [x] 269 тестов (было 265), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

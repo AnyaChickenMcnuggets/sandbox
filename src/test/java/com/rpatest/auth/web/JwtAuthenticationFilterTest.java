@@ -7,7 +7,9 @@ import static org.mockito.Mockito.when;
 
 import com.rpatest.auth.domain.Role;
 import com.rpatest.auth.service.JwtService;
+import com.rpatest.config.AuthProperties;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -17,7 +19,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 class JwtAuthenticationFilterTest {
 
     private final JwtService jwtService = mock(JwtService.class);
-    private final JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService);
+    private final AuthCookies authCookies = new AuthCookies(new AuthProperties());
+    private final JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtService, authCookies);
 
     @AfterEach
     void clearContext() {
@@ -39,6 +42,34 @@ class JwtAuthenticationFilterTest {
         assertThat(authentication.getName()).isEqualTo("alice");
         assertThat(authentication.getAuthorities()).extracting(Object::toString).containsExactly("ROLE_OPERATOR");
         verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void setsAuthenticationFromAccessTokenCookieWhenNoHeaderPresent() throws Exception {
+        when(jwtService.parse("cookie-token")).thenReturn(new JwtService.AccessTokenClaims("bob", Role.VIEWER));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new Cookie(AuthCookies.ACCESS_TOKEN_COOKIE, "cookie-token"));
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilterInternal(request, new MockHttpServletResponse(), chain);
+
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(authentication).isNotNull();
+        assertThat(authentication.getName()).isEqualTo("bob");
+    }
+
+    @Test
+    void prefersCookieOverHeaderWhenBothPresent() throws Exception {
+        when(jwtService.parse("cookie-token")).thenReturn(new JwtService.AccessTokenClaims("cookie-user", Role.VIEWER));
+        when(jwtService.parse("header-token")).thenReturn(new JwtService.AccessTokenClaims("header-user", Role.ADMIN));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new Cookie(AuthCookies.ACCESS_TOKEN_COOKIE, "cookie-token"));
+        request.addHeader("Authorization", "Bearer header-token");
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilterInternal(request, new MockHttpServletResponse(), chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication().getName()).isEqualTo("cookie-user");
     }
 
     @Test

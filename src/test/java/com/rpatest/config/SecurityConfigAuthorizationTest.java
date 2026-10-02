@@ -41,7 +41,8 @@ import org.springframework.test.web.servlet.MockMvc;
  * *ControllerTest с {@code addFilters=false}). Реальный {@code SecurityConfig} импортирован
  * намеренно, фильтры НЕ отключены.
  */
-@WebMvcTest(controllers = {RunController.class, ScenarioController.class, com.rpatest.auth.web.AdminUserController.class})
+@WebMvcTest(controllers = {RunController.class, ScenarioController.class, com.rpatest.auth.web.AdminUserController.class,
+        com.rpatest.auth.web.AuthController.class})
 @Import(SecurityConfig.class)
 class SecurityConfigAuthorizationTest {
 
@@ -65,6 +66,12 @@ class SecurityConfigAuthorizationTest {
 
     @MockBean
     private JwtService jwtService;
+
+    @MockBean
+    private com.rpatest.auth.web.AuthCookies authCookies;
+
+    @MockBean
+    private com.rpatest.auth.service.AuthService authService;
 
     @Test
     void unauthenticatedRequestIsRejectedWithUnauthorized() throws Exception {
@@ -145,6 +152,19 @@ class SecurityConfigAuthorizationTest {
         when(appUserService.list()).thenReturn(List.of(new AppUser("alice", "hash", Role.VIEWER)));
 
         mockMvc.perform(get("/api/v1/admin/users")).andExpect(status().isOk());
+    }
+
+    @Test
+    void meRequiresAuthenticationLikeAnyOtherEndpoint() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void meIsReachableByAnyAuthenticatedRoleNotJustOperatorOrAdmin() throws Exception {
+        // /me — "кто я", не операция уровня доступа: даже VIEWER (ниже всех в матрице) должен
+        // получить 200, а не 403, иначе ролевой гейтинг на фронте не сможет узнать, что он VIEWER
+        mockMvc.perform(get("/api/v1/auth/me")).andExpect(status().isOk());
     }
 
     private ScenarioRequest validScenarioRequest() {

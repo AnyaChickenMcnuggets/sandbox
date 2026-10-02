@@ -45,6 +45,10 @@ auth:
     secret: ${AUTH_JWT_SECRET:local-dev-only-change-me-32-bytes-minimum}
     access-token-ttl: 15m
     refresh-token-ttl: 7d
+  cookies:
+    # Secure-кука браузер не отправит обратно без HTTPS — см. HTTPS_SETUP.md. false — ТОЛЬКО для
+    # локальной разработки без TLS, никогда в проде/стейджинге (ADR 0004).
+    secure: ${AUTH_COOKIES_SECURE:true}
   bootstrap-admin:
     # Первый ADMIN создаётся при старте, если app_user пуста (см. AdminBootstrapRunner). Пустой
     # пароль — бутстрап пропускается (в лог уходит предупреждение), войти будет некому.

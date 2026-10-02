@@ -34,6 +34,9 @@ class CleanupControllerTest {
     @MockBean
     private JwtService jwtService;
 
+    @MockBean
+    private com.rpatest.auth.web.AuthCookies authCookies;
+
     @Test
     void cleanupReturnsSuccessWhenNoFailures() throws Exception {
         when(cleanupService.cleanupLastRun(5L)).thenReturn(List.of());
