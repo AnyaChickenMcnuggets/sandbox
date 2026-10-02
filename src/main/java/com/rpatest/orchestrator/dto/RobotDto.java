@@ -4,6 +4,6 @@ package com.rpatest.orchestrator.dto;
 public record RobotDto(int id, String name, RobotRunStatus status) {
 
     public boolean isFree() {
-        return status == RobotRunStatus.IDLE;
+        return status == RobotRunStatus.IDLE || status == RobotRunStatus.UNAVAILABLE;
     }
 }

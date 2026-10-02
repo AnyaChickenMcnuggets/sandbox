@@ -17,10 +17,26 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
     baseline-version: 0
+  mvc:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
+  servlet:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
 
 server:
   port: ${SERVER_PORT:8080}
-
+  ssl:
+    enabled: true
+    certificate: C:\Users\Shaydullin.II\Documents\Java\firesystem\server\IlianAPS2.crt
+    certificate-private-key: C:\Users\Shaydullin.II\Documents\Java\firesystem\server\IlianAPS2.key
+    compression:
+      enabled: true
+      mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
 auth:
   jwt:
     # HS256 ключ подписи — минимум 32 байта, иначе JwtService откажет при старте (см. ADR 0003).
