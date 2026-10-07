@@ -17,25 +17,26 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
     baseline-version: 0
+  mvc:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
+  servlet:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
 
 server:
   port: ${SERVER_PORT:8080}
-  # Если HTTPS терминируется перед приложением (nginx/Caddy/корпоративный балансировщик — см.
-  # HTTPS_SETUP.md, рекомендуемый вариант), Spring должен доверять X-Forwarded-Proto/-For/-Host от
-  # прокси, иначе не поймёт, что внешний запрос был https — это не влияет на auth.cookies.secure
-  # (кука остаётся Secure независимо), но важно для корректных ссылок/redirect-ов в будущем.
-  # Безопасно оставлять включённым и без прокси — заголовки от внешнего клиента Spring Boot
-  # игнорирует, если запрос пришёл не от доверенного прокси (см. server.tomcat.remoteip, дефолт).
-  forward-headers-strategy: framework
-  # Прямой TLS в самом приложении (вариант Б в HTTPS_SETUP.md) — если прокси нет/не вариант.
-  # Раскомментировать и подставить свой keystore, задать AUTH_COOKIES_SECURE=true (дефолт и так true).
-  # ssl:
-  #   enabled: true
-  #   key-store: ${SERVER_SSL_KEYSTORE:classpath:keystore.p12}
-  #   key-store-password: ${SERVER_SSL_KEYSTORE_PASSWORD:}
-  #   key-store-type: PKCS12
-  #   key-alias: ${SERVER_SSL_KEY_ALIAS:rpa-test-automation}
-
+  ssl:
+    enabled: true
+    certificate: C:\Users\Shaydullin.II\Documents\Java\firesystem\server\IlianAPS2.crt
+    certificate-private-key: C:\Users\Shaydullin.II\Documents\Java\firesystem\server\IlianAPS2.key
+    compression:
+      enabled: true
+      mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
 auth:
   jwt:
     # HS256 ключ подписи — минимум 32 байта, иначе JwtService откажет при старте (см. ADR 0003).
