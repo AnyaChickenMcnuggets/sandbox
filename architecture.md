@@ -84,9 +84,9 @@ scenario_run 1───* step_run 1───* queue_item_result
    (`RobotDto.isFree()`, mirrors `LTools.Enums.RunStatus`: `Unavailable`/`Idle`/`Running`). Если
    свободных меньше `orchestrator.min-free-robots` (по умолчанию 2) — прогон не создаётся вообще,
    `409 CONFLICT` с текстом вида "свободно 1 из 3, требуется минимум 2". Смысл: без этого `JOB`-шаг
-   уходил в `RpaProjectQueue` и висел там в ожидании робота до собственного таймаута
-   (`orchestrator.polling.timeout`, по умолчанию 30 минут) — пользователь узнавал о нехватке
-   роботов только тогда, а не сразу при попытке запуска. Проверка простая и **не анализирует DAG
+   уходил в `RpaProjectQueue` и висел там в ожидании робота (раньше — до скрытого таймаута в
+   30 минут, теперь без лимита, если автор сценария не задал `timeoutSeconds`, ADR 0006) —
+   пользователь узнавал о нехватке роботов только тогда, а не сразу при попытке запуска. Проверка простая и **не анализирует DAG
    сценария** — блокирует запуск любого прогона независимо от того, сколько в нём реально `JOB`-шагов
    (в том числе при `startStepId`, даже если точка возобновления не содержит ни одного `JOB`); это
    осознанное упрощение, см. `roadmap.md`.
@@ -136,7 +136,7 @@ scenario_run 1───* step_run 1───* queue_item_result
    `RpaProjectQueue` (ждёт свободного робота), либо уже выполняется, но не завершилось. Терминал —
    появление записи с `completedAt`/`killedAt`; `JobStepExecutor` завершает шаг `FAILED`, если
    `success != true`, дополнительно обогащая сообщение об ошибке текстом из `RpaProjectQueue`
-   (`errorMsg` — туда пишется причина сбоя выполнения). Таймаут (`orchestrator.polling.timeout`)
+   (`errorMsg` — туда пишется причина сбоя выполнения). Таймаут (только если задан `config.timeoutSeconds` шага `JOB`, глобального нет — ADR 0006)
    даёт разное сообщение в зависимости от того, где застряло задание — всё ещё в
    `RpaProjectQueue` (робот не подхватил) или уже выполняется на роботе, но не завершилось, или не
    найдено вообще нигде (см. `StatusPoller.buildTimeoutMessage`).
@@ -155,7 +155,8 @@ scenario_run 1───* step_run 1───* queue_item_result
    эндпоинт неактуален и молча возвращает не тот формат ответа, см. ниже) до тех пор, пока фактические
    количества элементов по производному статусу (`QueueItemDerivedStatus`, опционально
    отфильтрованные по списку `naturalKey`) не достигнут ожидаемых из `config.expectedStatusCounts`
-   / `config.minTotalCount`, либо не истечёт `orchestrator.queue-check-polling.timeout`.
+   / `config.minTotalCount`, либо не истечёт `config.timeoutSeconds` шага (не задан — без ограничения по времени, ADR 0006;
+   падает только по досрочному выходу, ниже, либо ручной остановкой прогона).
    **`expectedStatusCounts` — это минимум по каждому статусу (`actual >= expected`), не точное
    совпадение.** Раньше проверялось строгое равенство, и лишняя транзакция сверх ожидания (или
    более позднее увеличение счётчика уже после того, как сценарий фактически выполнился так, как
@@ -372,16 +373,36 @@ scenario_run 1───* step_run 1───* queue_item_result
   аутентифицированной роли (не под конкретной ролью в матрице — это "кто я", не операция); роль
   достаётся из `GrantedAuthority` текущего `Authentication` (`SecurityContextHolder`), без похода в
   БД — `JwtAuthenticationFilter` уже положил её туда при разборе токена.
-- **Роли — `ADMIN`/`OPERATOR`/`VIEWER`, одна на пользователя** (`app_user.role`). Матрица доступа
-  вся целиком в `SecurityConfig.securityFilterChain` (`authorizeHttpRequests`):
+- **Роли — `ADMIN`/`OPERATOR`/`VIEWER`, одна на пользователя** (`app_user.role`); **права
+  (`Permission`) выдаются ролям матрицей в БД, которую редактирует админ** (Sprint 29, ADR 0005).
+  `SecurityConfig` знает только привязку "эндпоинт -> право", а "у роли есть право" спрашивает у
+  `RolePermissionService` (кэш в памяти процесса, сбрасывается после коммита изменения; `ADMIN`
+  всегда имеет все права и не редактируется — защита от самоблокировки). Всё, что не привязано к
+  праву под `/api/v1/scenarios|runs|orchestrator|admin`, закрыто `denyAll()`:
 
-  | Эндпоинт | VIEWER | OPERATOR | ADMIN |
-  |---|---|---|---|
-  | `GET /scenarios`, `GET /scenarios/{id}`, `GET /runs/**`, `GET /orchestrator/robots-availability` | ✅ | ✅ | ✅ |
-  | `POST/PUT /scenarios/**`, `POST /scenarios/{id}/run`, `POST /runs/{id}/stop`, `POST /scenarios/{id}/cleanup` | ❌ | ✅ | ✅ |
-  | `DELETE /scenarios/{id}` | ❌ | ❌ | ✅ |
-  | `/api/v1/admin/**` | ❌ | ❌ | ✅ |
+  | Право | Эндпоинты | По умолчанию (миграция `V12`) |
+  |---|---|---|
+  | `SCENARIO_READ` | `GET /scenarios`, `GET /scenarios/{id}` | VIEWER, OPERATOR |
+  | `SCENARIO_WRITE` | `POST /scenarios`, `PUT /scenarios/{id}` | OPERATOR |
+  | `SCENARIO_DELETE` | `DELETE /scenarios/{id}` | — (только ADMIN) |
+  | `RUN_READ` | `GET /runs/**` (прогон, `queue-items`) | VIEWER, OPERATOR |
+  | `RUN_START` | `POST /scenarios/{id}/run` | OPERATOR |
+  | `RUN_STOP` | `POST /runs/{id}/stop` | OPERATOR |
+  | `CLEANUP` | `POST /scenarios/{id}/cleanup` | OPERATOR |
+  | `ORCHESTRATOR_READ` | `GET /orchestrator/robots-availability` | VIEWER, OPERATOR |
+  | `USER_MANAGE` | `/api/v1/admin/users/**` | — (только ADMIN) |
+  | `ROLE_MANAGE` | `/api/v1/admin/roles/**`, `/api/v1/admin/permissions` | — (только ADMIN) |
 
+  Управление матрицей — `RolePermissionController`: `GET /api/v1/admin/permissions` (справочник),
+  `GET /api/v1/admin/roles` (текущая матрица, у `ADMIN` `editable=false`), `PUT
+  /api/v1/admin/roles/{role}/permissions` (полная замена набора; для `ADMIN` — `400`). Новое право
+  через API завести нельзя — оно привязывается к эндпоинту в коде. `GET /api/v1/auth/me` теперь
+  возвращает и `permissions` текущей роли — UI-гейтинг делается по правам, не по имени роли.
+- **Смена собственного пароля** — `POST /api/v1/auth/change-password` (`currentPassword`,
+  `newPassword`), любая аутентифицированная роль, отдельное право не нужно. Требует текущий пароль
+  (`400` если неверен или новый совпадает с текущим), отзывает ВСЕ refresh-токены пользователя
+  (прочие сессии разлогинены), текущей сессии выдаёт новую пару кук — как login. В отличие от
+  `PUT /api/v1/admin/users/{id}/password` (сброс админом без знания текущего пароля).
 - **Пользователи — только через `AdminUserController`** (`/api/v1/admin/users`, `ADMIN`-only):
   создание, список, роль, `enabled`, сброс пароля. Нет self-registration и нет удаления —
   деактивация (`enabled=false`) вместо удаления (та же причина, что `ON DELETE SET NULL` для
@@ -415,8 +436,8 @@ scenario_run 1───* step_run 1───* queue_item_result
 |---|---|
 | `orchestrator.base-url` | базовый URL Primo RPA Orchestrator |
 | `orchestrator.credentials.username/password` | учётные данные (Jasypt `ENC(...)`) |
-| `orchestrator.polling.interval` / `orchestrator.polling.timeout` | параметры опроса статуса Assignment |
-| `orchestrator.queue-check-polling.interval` / `.timeout` | параметры опроса очереди в `QUEUE_CHECK` (по умолчанию для шагов без своих `pollIntervalSeconds`/`timeoutSeconds`) |
+| `orchestrator.polling.interval` | интервал опроса статуса Assignment (переопределяется `JOB.config.pollIntervalSeconds`). Глобального таймаута нет — только `JOB.config.timeoutSeconds` |
+| `orchestrator.queue-check-polling.interval` | интервал опроса очереди в `QUEUE_CHECK` (по умолчанию для шагов без своего `pollIntervalSeconds`). Глобального таймаута нет — только `QUEUE_CHECK.config.timeoutSeconds` |
 | `orchestrator.min-free-robots` | минимум свободных (Idle) роботов, при котором `POST .../run` вообще стартует прогон (иначе `409`), по умолчанию 2 |
 | `orchestrator.http.connect-timeout` / `read-timeout` | таймауты HTTP-клиента |
 | `orchestrator.tls.trusted-certificates` | пути к сертификатам CA оркестратора (`file:...`), если он за внутренним CA — иначе PKIX path building failed |

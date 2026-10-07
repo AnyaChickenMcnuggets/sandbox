@@ -520,6 +520,35 @@ CASCADE` — удаление сценария и без всякого ново
 - [x] `FRONTEND_INTEGRATION.md` обновлён — новый раздел с примером запроса/ответа
 - [x] 269 тестов (было 265), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 29 — Без скрытых таймаутов, смена своего пароля, редактируемая матрица прав — DONE
+Пользователь: убрать скрытые таймауты на компонентах (всё опционально и в сценарии — и в задании,
+и в очередях); нормальный эндпоинт смены пароля самим пользователем; управление матрицей
+роль-права админом. Решения — ADR 0005, ADR 0006.
+- [x] Таймауты (ADR 0006): из `OrchestratorProperties.Polling` и `application.yml` убраны
+      `polling.timeout: 30m` и `queue-check-polling.timeout: 10m` — остался только `interval`.
+      `JobStepConfig` получил `timeoutSeconds` и `pollIntervalSeconds` (раньше у JOB не было вообще),
+      `StatusPoller.pollUntilTerminal(..., timeout, interval)`, `QueueCheckStepExecutor` берёт
+      таймаут только из `config.timeoutSeconds`; `null` = без лимита. HTTP connect/read-таймауты
+      (один сетевой вызов) оставлены — видны в `application.yml`
+- [x] `POST /api/v1/auth/change-password` — `AuthService.changePassword`: текущий пароль
+      обязателен (`400`), новый не должен совпадать с текущим, отзываются все refresh-токены,
+      текущей сессии новая пара кук. Любая аутентифицированная роль
+- [x] Матрица прав (ADR 0005): `Permission` (10 прав), `RolePermission` + миграция `V12` (засеяна
+      прежней жёсткой матрицей), `RolePermissionService` (кэш, сброс после коммита, `ADMIN` = всё и
+      не редактируется), `PermissionAuthorization` (`AuthorizationManager`),
+      `SecurityConfig` переведён с `hasRole` на `access(permissions.has(...))` + `denyAll()` на всё
+      не сопоставленное праву
+- [x] Admin API матрицы: `GET /api/v1/admin/permissions`, `GET /api/v1/admin/roles`,
+      `PUT /api/v1/admin/roles/{role}/permissions` (право `ROLE_MANAGE`)
+- [x] `GET /api/v1/auth/me` теперь возвращает `permissions` (UI-гейтинг по правам, не по роли)
+- [x] Тесты: `RolePermissionServiceTest`, `RolePermissionControllerTest`, `RolePermissionRepositoryIT`
+      (Docker нужен, здесь не запускается), `AuthServiceTest`/`AuthControllerTest` (смена пароля,
+      `/me` с правами), `SecurityConfigAuthorizationTest` переписан (все права, динамическая смена
+      матрицы, `denyAll` для не сопоставленного, `/me`/смена пароля для любой роли),
+      `StatusPollerTest`/`QueueCheckStepExecutorTest`/`JobStepExecutorTest` (без таймаута ждёт
+      дольше прежнего дефолта, таймаут/интервал из конфига шага)
+- [x] 302 теста (было 269), `mvn verify` (JaCoCo) — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

@@ -28,7 +28,9 @@ import java.util.Map;
  * @param minTotalCount минимальное количество подходящих (под naturalKeys) элементов — для
  *                    случаев, когда точное количество результатов заранее не известно (N входных
  *                    транзакций могут превратиться в M выходных с тем же базовым natural key)
- * @param timeoutSeconds таймаут ожидания (null — берётся из orchestrator.queue-check-polling)
+ * @param timeoutSeconds таймаут ожидания (null — без ограничения по времени: шаг ждёт, пока
+ *                    ожидание не выполнится, не станет заведомо невыполнимым (см. досрочный выход
+ *                    в {@code QueueCheckStepExecutor}) либо прогон не остановят вручную)
  * @param pollIntervalSeconds интервал опроса (null — берётся из orchestrator.queue-check-polling)
  */
 public record QueueCheckStepConfig(

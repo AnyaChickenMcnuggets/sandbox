@@ -2,13 +2,15 @@ package com.rpatest.auth.web;
 
 import com.rpatest.auth.domain.Role;
 import com.rpatest.auth.service.AuthService;
+import com.rpatest.auth.service.AuthenticationRoles;
 import com.rpatest.auth.service.InvalidCredentialsException;
+import com.rpatest.auth.service.RolePermissionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.util.TreeSet;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,10 +24,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuthCookies authCookies;
+    private final RolePermissionService rolePermissionService;
 
-    public AuthController(AuthService authService, AuthCookies authCookies) {
+    public AuthController(
+            AuthService authService, AuthCookies authCookies, RolePermissionService rolePermissionService) {
         this.authService = authService;
         this.authCookies = authCookies;
+        this.rolePermissionService = rolePermissionService;
     }
 
     @PostMapping("/login")
@@ -52,13 +57,18 @@ public class AuthController {
     @GetMapping("/me")
     public MeResponse me() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        Role role = authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .filter(authority -> authority.startsWith("ROLE_"))
-                .map(authority -> Role.valueOf(authority.substring("ROLE_".length())))
-                .findFirst()
+        Role role = AuthenticationRoles.roleOf(authentication)
                 .orElseThrow(() -> new IllegalStateException("Аутентифицированный запрос без роли"));
-        return new MeResponse(authentication.getName(), role);
+        return new MeResponse(authentication.getName(), role, new TreeSet<>(rolePermissionService.permissionsOf(role)));
+    }
+
+    /** Смена СВОЕГО пароля (любая аутентифицированная роль, отдельное право не нужно) — в отличие
+     * от {@code PUT /api/v1/admin/users/{id}/password} (сброс админом) требует текущий пароль.
+     * Ответ — как у login: текущей сессии выдаётся новая пара кук, остальные сессии отозваны. */
+    @PostMapping("/change-password")
+    public ResponseEntity<TokenResponse> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        return withTokenCookies(authService.changePassword(username, request.currentPassword(), request.newPassword()));
     }
 
     @PostMapping("/logout")

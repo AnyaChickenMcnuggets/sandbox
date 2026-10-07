@@ -2,6 +2,7 @@ package com.rpatest.auth.service;
 
 import com.rpatest.auth.domain.AppUser;
 import com.rpatest.auth.repository.AppUserRepository;
+import com.rpatest.common.exception.InvalidRequestException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +50,28 @@ public class AuthService {
     @Transactional
     public void logout(String rawRefreshToken) {
         refreshTokenService.revoke(rawRefreshToken);
+    }
+
+    /**
+     * Смена собственного пароля: обязательно подтверждение текущим паролем (украденная сессия
+     * сама по себе не позволяет угнать аккаунт). Все refresh-токены пользователя отзываются (другие
+     * устройства/сессии разлогиниваются), текущей сессии выдаётся новая пара — пользователь не
+     * вылетает на экран логина сразу после смены.
+     */
+    @Transactional
+    public TokenPair changePassword(String username, String currentPassword, String newPassword) {
+        AppUser user = appUserRepository.findByUsername(username)
+                .filter(AppUser::isEnabled)
+                .orElseThrow(() -> new InvalidCredentialsException("Пользователь недоступен"));
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new InvalidRequestException("Текущий пароль указан неверно");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+            throw new InvalidRequestException("Новый пароль должен отличаться от текущего");
+        }
+        user.changePasswordHash(passwordEncoder.encode(newPassword));
+        refreshTokenService.revokeAllForUser(user.getId());
+        return issueTokenPair(user);
     }
 
     private TokenPair issueTokenPair(AppUser user) {

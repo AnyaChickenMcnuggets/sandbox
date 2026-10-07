@@ -15,6 +15,7 @@ import com.rpatest.orchestrator.util.OrchestratorNames;
 import com.rpatest.orchestrator.util.OrchestratorNarration;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -84,7 +85,11 @@ public class JobStepExecutor implements StepExecutor {
             assignmentsPort.start(created.id());
             log.info("Шаг '{}': Assignment id={} запущен (Start), начинаю отслеживание", step.getName(), created.id());
 
-            RpaProjectLaunchDto launch = statusPoller.pollUntilTerminal(stepRun, created.id(), assignmentName);
+            Duration timeout = config.timeoutSeconds() != null ? Duration.ofSeconds(config.timeoutSeconds()) : null;
+            Duration pollInterval =
+                    config.pollIntervalSeconds() != null ? Duration.ofSeconds(config.pollIntervalSeconds()) : null;
+            RpaProjectLaunchDto launch =
+                    statusPoller.pollUntilTerminal(stepRun, created.id(), assignmentName, timeout, pollInterval);
             log.info("Шаг '{}': Assignment id={} завершён, success={}, robot='{}'",
                     step.getName(), created.id(), launch.isSuccess(), launch.robotName());
             if (!launch.isSuccess()) {

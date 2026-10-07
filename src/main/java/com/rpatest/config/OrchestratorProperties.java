@@ -11,7 +11,7 @@ public class OrchestratorProperties {
     private Credentials credentials = new Credentials();
     private Http http = new Http();
     private Polling polling = new Polling();
-    private Polling queueCheckPolling = new Polling(Duration.ofSeconds(5), Duration.ofMinutes(10));
+    private Polling queueCheckPolling = new Polling(Duration.ofSeconds(5));
     private Tls tls = new Tls();
 
     /** Минимум свободных (Idle) роботов на оркестраторе, при котором разрешён запуск сценария —
@@ -117,16 +117,17 @@ public class OrchestratorProperties {
         }
     }
 
+    /** Только интервал опроса — таймаута ожидания здесь намеренно нет (ADR 0005): ограничение по
+     * времени задаётся исключительно в конфиге шага сценария ({@code timeoutSeconds}), без скрытых
+     * глобальных дефолтов. */
     public static class Polling {
         private Duration interval = Duration.ofSeconds(5);
-        private Duration timeout = Duration.ofMinutes(30);
 
         public Polling() {
         }
 
-        public Polling(Duration interval, Duration timeout) {
+        public Polling(Duration interval) {
             this.interval = interval;
-            this.timeout = timeout;
         }
 
         public Duration getInterval() {
@@ -135,14 +136,6 @@ public class OrchestratorProperties {
 
         public void setInterval(Duration interval) {
             this.interval = interval;
-        }
-
-        public Duration getTimeout() {
-            return timeout;
-        }
-
-        public void setTimeout(Duration timeout) {
-            this.timeout = timeout;
         }
     }
 

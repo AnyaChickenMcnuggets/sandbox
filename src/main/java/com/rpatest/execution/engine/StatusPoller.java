@@ -43,9 +43,15 @@ public class StatusPoller {
         this.properties = properties;
     }
 
-    public RpaProjectLaunchDto pollUntilTerminal(StepRun stepRun, int assignmentId, String assignmentLabel) {
-        Duration interval = properties.getPolling().getInterval();
-        Instant deadline = Instant.now().plus(properties.getPolling().getTimeout());
+    /**
+     * @param timeout максимальное время ожидания; {@code null} — без ограничения (ADR 0005, источник
+     *                значения — только {@code JobStepConfig.timeoutSeconds} шага сценария)
+     * @param interval интервал опроса; {@code null} — {@code orchestrator.polling.interval}
+     */
+    public RpaProjectLaunchDto pollUntilTerminal(
+            StepRun stepRun, int assignmentId, String assignmentLabel, Duration timeout, Duration interval) {
+        Duration pollInterval = interval != null ? interval : properties.getPolling().getInterval();
+        Instant deadline = timeout == null ? null : Instant.now().plus(timeout);
         int attempt = 0;
         while (true) {
             attempt++;
@@ -61,12 +67,12 @@ public class StatusPoller {
             log.debug("Попытка #{} опроса задания '{}' (id={}): {}", attempt, assignmentLabel, assignmentId, state);
             progressReporter.report(stepRun, "Задание '" + assignmentLabel + "' " + state + " (попытка #" + attempt + ")");
 
-            if (Instant.now().isAfter(deadline)) {
+            if (deadline != null && Instant.now().isAfter(deadline)) {
                 throw new StepExecutionException(
                         "Таймаут ожидания завершения задания '" + assignmentLabel + "'. Последнее известное состояние: "
                                 + state);
             }
-            sleep(interval);
+            sleep(pollInterval);
         }
     }
 

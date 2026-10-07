@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 
 class StatusPollerTest {
 
+    private static final Duration TIMEOUT = Duration.ofMillis(150);
+
     private RpaProjectLaunchesPort rpaProjectLaunchesPort;
     private RpaProjectQueuePort rpaProjectQueuePort;
     private StatusPoller poller;
@@ -33,7 +35,6 @@ class StatusPollerTest {
         StepProgressReporter progressReporter = new StepProgressReporter(mock(StepRunRepository.class));
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.getPolling().setInterval(Duration.ofMillis(10));
-        properties.getPolling().setTimeout(Duration.ofMillis(150));
         OrchestratorLookup orchestratorLookup = new OrchestratorLookup(mock(RpaProjectsPort.class), rpaProjectQueuePort);
         poller = new StatusPoller(rpaProjectLaunchesPort, orchestratorLookup, progressReporter, properties);
         stepRun = new StepRun(1L, 2L);
@@ -44,7 +45,7 @@ class StatusPollerTest {
         RpaProjectLaunchDto launch = launch(LocalDateTime.now(), true);
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(launch));
 
-        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1");
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null);
 
         assertThat(result.isSuccess()).isTrue();
     }
@@ -59,7 +60,7 @@ class StatusPollerTest {
                 .thenReturn(List.of(running))
                 .thenReturn(List.of(completed));
 
-        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1");
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null);
 
         assertThat(result.isSuccess()).isFalse();
     }
@@ -70,7 +71,7 @@ class StatusPollerTest {
         when(rpaProjectQueuePort.findByAssignment(1))
                 .thenReturn(List.of(new QueueItemProjectDto(1, 1, null, null, LocalDateTime.now(), null)));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1"))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("в очереди проектов");
     }
@@ -80,7 +81,7 @@ class StatusPollerTest {
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
         when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1"))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("не найдено ни в очереди проектов, ни среди запусков");
     }
@@ -91,7 +92,7 @@ class StatusPollerTest {
                 1, 7, 5, "robot-1", 1, LocalDateTime.now(), null, null, null, LocalDateTime.now());
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(running));
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1"))
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("robot-1");
     }
@@ -103,10 +104,41 @@ class StatusPollerTest {
         RpaProjectLaunchDto launch = launch(LocalDateTime.now(), true);
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of(launch));
 
-        poller.pollUntilTerminal(stepRun, 1, "First Job_24_36");
+        poller.pollUntilTerminal(stepRun, 1, "First Job_24_36", TIMEOUT, null);
 
         assertThat(stepRun.getDetail()).contains("First Job_24_36");
         assertThat(stepRun.getDetail()).doesNotContain("id=1");
+    }
+
+    @Test
+    void withoutTimeoutKeepsPollingPastWhatWouldBeTimeoutAndFinishesWhenLaunchCompletes() {
+        // timeout=null — никакого скрытого дедлайна: 30 пустых опросов подряд (интервал 10мс =
+        // 300мс, вдвое больше TIMEOUT) не роняют шаг, он дожидается завершения
+        RpaProjectLaunchDto completed = launch(LocalDateTime.now(), true);
+        org.mockito.stubbing.OngoingStubbing<List<RpaProjectLaunchDto>> stub =
+                when(rpaProjectLaunchesPort.getByAssignment(1));
+        for (int i = 0; i < 30; i++) {
+            stub = stub.thenReturn(List.of());
+        }
+        stub.thenReturn(List.of(completed));
+        when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
+
+        RpaProjectLaunchDto result = poller.pollUntilTerminal(stepRun, 1, "job-1", null, null);
+
+        assertThat(result.isSuccess()).isTrue();
+    }
+
+    @Test
+    void explicitIntervalOverridesDefault() {
+        // интервал из сценария (1мс) вместо orchestrator.polling.interval (10мс) — 150мс таймаут
+        // успевает сделать заметно больше опросов
+        when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
+        when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, Duration.ofMillis(1)))
+                .isInstanceOf(StepExecutionException.class);
+
+        org.mockito.Mockito.verify(rpaProjectLaunchesPort, org.mockito.Mockito.atLeast(30)).getByAssignment(1);
     }
 
     private RpaProjectLaunchDto launch(LocalDateTime startedAt, boolean success) {

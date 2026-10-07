@@ -46,6 +46,9 @@ class AuthControllerTest {
     @MockBean
     private AuthCookies authCookies;
 
+    @MockBean
+    private com.rpatest.auth.service.RolePermissionService rolePermissionService;
+
     // JwtAuthenticationFilter (Filter-бин) попадает в @WebMvcTest slice даже при addFilters=false
     @MockBean
     private JwtService jwtService;
@@ -138,19 +141,71 @@ class AuthControllerTest {
 
     @Test
     @WithMockUser(username = "alice", roles = "OPERATOR")
-    void meReturnsUsernameAndRoleFromAuthentication() throws Exception {
+    void meReturnsUsernameRoleAndPermissionsFromAuthentication() throws Exception {
+        when(rolePermissionService.permissionsOf(com.rpatest.auth.domain.Role.OPERATOR)).thenReturn(
+                java.util.EnumSet.of(com.rpatest.auth.domain.Permission.SCENARIO_READ,
+                        com.rpatest.auth.domain.Permission.RUN_START));
+
         mockMvc.perform(get("/api/v1/auth/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("alice"))
-                .andExpect(jsonPath("$.role").value("OPERATOR"));
+                .andExpect(jsonPath("$.role").value("OPERATOR"))
+                .andExpect(jsonPath("$.permissions.length()").value(2))
+                .andExpect(jsonPath("$.permissions[0]").value("SCENARIO_READ"))
+                .andExpect(jsonPath("$.permissions[1]").value("RUN_START"));
     }
 
     @Test
     @WithMockUser(username = "bob", roles = "ADMIN")
     void meReflectsAdminRole() throws Exception {
+        when(rolePermissionService.permissionsOf(com.rpatest.auth.domain.Role.ADMIN)).thenReturn(
+                java.util.EnumSet.allOf(com.rpatest.auth.domain.Permission.class));
+
         mockMvc.perform(get("/api/v1/auth/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.role").value("ADMIN"));
+    }
+
+    @Test
+    @WithMockUser(username = "alice", roles = "VIEWER")
+    void changePasswordSetsNewCookiesAndDelegatesWithPrincipalName() throws Exception {
+        when(authService.changePassword("alice", "old-password", "new-password-1"))
+                .thenReturn(new AuthService.TokenPair("new-access", "new-refresh", 900));
+        when(authCookies.accessTokenCookie("new-access")).thenReturn(cookie("access_token", "new-access"));
+        when(authCookies.refreshTokenCookie("new-refresh")).thenReturn(cookie("refresh_token", "new-refresh"));
+
+        mockMvc.perform(post("/api/v1/auth/change-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ChangePasswordRequest("old-password", "new-password-1"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expiresInSeconds").value(900))
+                .andExpect(result -> assertThat(result.getResponse().getHeaders("Set-Cookie"))
+                        .anyMatch(h -> h.contains("access_token=new-access")));
+    }
+
+    @Test
+    @WithMockUser(username = "alice", roles = "VIEWER")
+    void changePasswordRejectsShortNewPassword() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/change-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ChangePasswordRequest("old-password", "short"))))
+                .andExpect(status().isBadRequest());
+
+        verify(authService, never()).changePassword(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @WithMockUser(username = "alice", roles = "VIEWER")
+    void changePasswordWithWrongCurrentPasswordReturnsBadRequest() throws Exception {
+        when(authService.changePassword("alice", "wrong", "new-password-1"))
+                .thenThrow(new com.rpatest.common.exception.InvalidRequestException("Текущий пароль указан неверно"));
+
+        mockMvc.perform(post("/api/v1/auth/change-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ChangePasswordRequest("wrong", "new-password-1"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
 
     @Test

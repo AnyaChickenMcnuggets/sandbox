@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.rpatest.auth.domain.AppUser;
 import com.rpatest.auth.domain.Role;
 import com.rpatest.auth.repository.AppUserRepository;
+import com.rpatest.common.exception.InvalidRequestException;
 import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -106,6 +107,58 @@ class AuthServiceTest {
         when(appUserRepository.findById(42L)).thenReturn(Optional.of(disabled));
 
         assertThatThrownBy(() -> authService.refresh("raw-refresh")).isInstanceOf(InvalidCredentialsException.class);
+    }
+
+    @Test
+    void changePasswordUpdatesHashRevokesAllSessionsAndIssuesNewPair() {
+        AppUser user = enabledUser("alice", "old-hash");
+        setId(user, 42L);
+        when(appUserRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("current", "old-hash")).thenReturn(true);
+        when(passwordEncoder.matches("brand-new-pass", "old-hash")).thenReturn(false);
+        when(passwordEncoder.encode("brand-new-pass")).thenReturn("new-hash");
+        when(jwtService.issueAccessToken(user)).thenReturn("access");
+        when(refreshTokenService.issue(42L)).thenReturn("refresh");
+
+        AuthService.TokenPair result = authService.changePassword("alice", "current", "brand-new-pass");
+
+        assertThat(user.getPasswordHash()).isEqualTo("new-hash");
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(refreshTokenService);
+        order.verify(refreshTokenService).revokeAllForUser(42L);
+        order.verify(refreshTokenService).issue(42L);
+        assertThat(result.accessToken()).isEqualTo("access");
+    }
+
+    @Test
+    void changePasswordRejectsWrongCurrentPasswordWithoutTouchingState() {
+        AppUser user = enabledUser("alice", "old-hash");
+        setId(user, 42L);
+        when(appUserRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong", "old-hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.changePassword("alice", "wrong", "brand-new-pass"))
+                .isInstanceOf(InvalidRequestException.class);
+
+        assertThat(user.getPasswordHash()).isEqualTo("old-hash");
+        verify(refreshTokenService, org.mockito.Mockito.never()).revokeAllForUser(42L);
+    }
+
+    @Test
+    void changePasswordRejectsNewPasswordEqualToCurrent() {
+        AppUser user = enabledUser("alice", "old-hash");
+        when(appUserRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("same-password", "old-hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.changePassword("alice", "same-password", "same-password"))
+                .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    void changePasswordRejectsDisabledOrMissingUser() {
+        when(appUserRepository.findByUsername("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.changePassword("ghost", "a", "brand-new-pass"))
+                .isInstanceOf(InvalidCredentialsException.class);
     }
 
     @Test

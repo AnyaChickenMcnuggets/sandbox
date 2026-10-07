@@ -39,7 +39,6 @@ class QueueCheckStepExecutorTest {
         exchangeQueuesPort = mock(ExchangeQueuesPort.class);
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.getQueueCheckPolling().setInterval(Duration.ofMillis(10));
-        properties.getQueueCheckPolling().setTimeout(Duration.ofMillis(150));
         StepProgressReporter progressReporter = new StepProgressReporter(mock(StepRunRepository.class));
         executor = new QueueCheckStepExecutor(new QueueItemFinder(exchangeQueuesPort),
                 new ExchangeQueueProvisioner(exchangeQueuesPort), progressReporter, properties, new ObjectMapper());
@@ -141,6 +140,7 @@ class QueueCheckStepExecutorTest {
         ScenarioStep step = step(Map.of(
                 "queueName", "q",
                 "naturalKeys", List.of("tx-1"),
+                "timeoutSeconds", 1,
                 "expectedStatusCounts", Map.of("SUCCESS", 1)));
         StepRun stepRun = new StepRun(1L, 2L);
 
@@ -190,12 +190,34 @@ class QueueCheckStepExecutorTest {
         when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", null))));
 
-        ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("SUCCESS", 5)));
+        ScenarioStep step = step(Map.of(
+                "queueName", "q", "timeoutSeconds", 1, "expectedStatusCounts", Map.of("SUCCESS", 5)));
         StepRun stepRun = new StepRun(1L, 2L);
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))
                 .isInstanceOf(StepExecutionException.class)
                 .hasMessageContaining("SUCCESS>=5");
+    }
+
+    @Test
+    void withoutTimeoutSecondsWaitsPastFormerDefaultAndSucceedsWhenItemsAppear() {
+        // timeoutSeconds не указан — никакого скрытого дедлайна: 30 опросов с пустым результатом
+        // (дольше, чем любой тестовый таймаут) не роняют шаг, он дожидается появления элемента
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        org.mockito.stubbing.OngoingStubbing<ListResultDto<ExchangeQueueValueDto>> stub =
+                when(exchangeQueuesPort.listItems(queueId, 0, 200));
+        for (int i = 0; i < 30; i++) {
+            stub = stub.thenReturn(ListResultDto.<ExchangeQueueValueDto>of(0, List.of()));
+        }
+        stub.thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", ExchangeQueueValueEventType.SUCCESS))));
+
+        ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 1));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
+
+        verify(exchangeQueuesPort, org.mockito.Mockito.atLeast(31)).listItems(queueId, 0, 200);
     }
 
     @Test
@@ -320,7 +342,7 @@ class QueueCheckStepExecutorTest {
         when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(1, List.of(
                 item("k1", ExchangeQueueValueEventType.SUCCESS))));
 
-        ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 5));
+        ScenarioStep step = step(Map.of("queueName", "q", "minTotalCount", 5, "timeoutSeconds", 1));
         StepRun stepRun = new StepRun(1L, 2L);
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))

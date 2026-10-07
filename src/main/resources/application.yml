@@ -59,15 +59,18 @@ orchestrator:
   credentials:
     username: ${ORCHESTRATOR_USERNAME:}
     password: ${ORCHESTRATOR_PASSWORD:}
+  # Таймауты одного HTTP-вызова к оркестратору (сетевой уровень, не ожидание шага) — явные и
+  # видимые здесь, не скрытые в коде.
   http:
     connect-timeout: 5s
     read-timeout: 30s
+  # Только интервал опроса. Таймаут ОЖИДАНИЯ шага глобально не задаётся (ADR 0005): его можно
+  # указать лишь в конфиге шага сценария — JOB: config.timeoutSeconds, QUEUE_CHECK:
+  # config.timeoutSeconds. Не указан — шаг ждёт без ограничения по времени.
   polling:
     interval: 5s
-    timeout: 30m
   queue-check-polling:
     interval: 5s
-    timeout: 10m
   # Минимум свободных (Idle) роботов на оркестраторе, при котором POST .../run вообще стартует
   # прогон — иначе 409 CONFLICT, не имеет смысла ставить задание в очередь заведомо без роботов.
   min-free-robots: ${ORCHESTRATOR_MIN_FREE_ROBOTS:2}

@@ -1,6 +1,8 @@
 package com.rpatest.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rpatest.auth.domain.Permission;
+import com.rpatest.auth.service.PermissionAuthorization;
 import com.rpatest.auth.web.JwtAuthenticationFilter;
 import com.rpatest.common.web.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,24 +23,25 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Единственное место, где живёт вся матрица доступа (см. ADR 0003) — роли размечены здесь через
- * {@code authorizeHttpRequests}, а не {@code @PreAuthorize} по контроллерам, чтобы политику можно
- * было целиком увидеть/проверить в одном файле, а не собирать по 4 контроллерам вручную.
+ * Единственное место, где эндпоинты привязаны к правам (см. ADR 0003, 0005) — через {@code
+ * authorizeHttpRequests}, а не {@code @PreAuthorize} по контроллерам, чтобы привязку можно было
+ * целиком увидеть/проверить в одном файле. Какие права есть у какой роли — не здесь, а в БД
+ * ({@code RolePermissionService}), редактируется админом через {@code /api/v1/admin/roles}.
  */
 @Configuration
 @EnableWebSecurity
 @EnableConfigurationProperties(AuthProperties.class)
 public class SecurityConfig {
 
-    private static final String[] VIEWER_UP = {"ADMIN", "OPERATOR", "VIEWER"};
-    private static final String[] OPERATOR_UP = {"ADMIN", "OPERATOR"};
-
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final ObjectMapper objectMapper;
+    private final PermissionAuthorization permissions;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, ObjectMapper objectMapper) {
+    public SecurityConfig(
+            JwtAuthenticationFilter jwtAuthenticationFilter, ObjectMapper objectMapper, PermissionAuthorization permissions) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.objectMapper = objectMapper;
+        this.permissions = permissions;
     }
 
     @Bean
@@ -61,14 +64,40 @@ public class SecurityConfig {
                 .exceptionHandling(eh -> eh
                         .authenticationEntryPoint(this::writeUnauthorized)
                         .accessDeniedHandler((request, response, ex) -> writeForbidden(response)))
+                // Порядок важен: первое совпавшее правило побеждает. Здесь только привязка
+                // эндпоинт -> право (Permission); кому какое право выдано — матрица ролей в БД
+                // (RolePermissionService, ADR 0005), её редактирует админ без деплоя.
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/**").permitAll()
-                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.DELETE, "/api/v1/scenarios/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/v1/scenarios/**", "/api/v1/runs/**", "/api/v1/orchestrator/**")
-                        .hasAnyRole(VIEWER_UP)
-                        .requestMatchers("/api/v1/scenarios/**", "/api/v1/runs/**").hasAnyRole(OPERATOR_UP)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/refresh",
+                                "/api/v1/auth/logout").permitAll()
+                        .requestMatchers("/api/v1/admin/users/**").access(permissions.has(Permission.USER_MANAGE))
+                        .requestMatchers("/api/v1/admin/roles/**", "/api/v1/admin/permissions")
+                        .access(permissions.has(Permission.ROLE_MANAGE))
+                        .requestMatchers("/api/v1/admin/**").denyAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/scenarios/*/run")
+                        .access(permissions.has(Permission.RUN_START))
+                        .requestMatchers(HttpMethod.POST, "/api/v1/scenarios/*/cleanup")
+                        .access(permissions.has(Permission.CLEANUP))
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/scenarios/*")
+                        .access(permissions.has(Permission.SCENARIO_DELETE))
+                        .requestMatchers(HttpMethod.GET, "/api/v1/scenarios", "/api/v1/scenarios/*")
+                        .access(permissions.has(Permission.SCENARIO_READ))
+                        .requestMatchers(HttpMethod.POST, "/api/v1/scenarios")
+                        .access(permissions.has(Permission.SCENARIO_WRITE))
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/scenarios/*")
+                        .access(permissions.has(Permission.SCENARIO_WRITE))
+                        .requestMatchers(HttpMethod.POST, "/api/v1/runs/*/stop")
+                        .access(permissions.has(Permission.RUN_STOP))
+                        .requestMatchers(HttpMethod.GET, "/api/v1/runs/**").access(permissions.has(Permission.RUN_READ))
+                        .requestMatchers(HttpMethod.GET, "/api/v1/orchestrator/**")
+                        .access(permissions.has(Permission.ORCHESTRATOR_READ))
+                        // Всё остальное под нашими префиксами (другой метод/путь, которому не
+                        // сопоставлено право) — закрыто, а не "просто аутентифицирован": новый
+                        // эндпоинт без явного права не должен случайно оказаться открытым
+                        .requestMatchers("/api/v1/scenarios/**", "/api/v1/runs/**", "/api/v1/orchestrator/**")
+                        .denyAll()
+                        // /api/v1/auth/me, /api/v1/auth/change-password — любой аутентифицированный
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();

@@ -75,12 +75,13 @@ public class QueueCheckStepExecutor implements StepExecutor {
         OrchestratorProperties.Polling defaults = properties.getQueueCheckPolling();
         Duration interval = config.pollIntervalSeconds() != null
                 ? Duration.ofSeconds(config.pollIntervalSeconds()) : defaults.getInterval();
-        Duration timeout = config.timeoutSeconds() != null
-                ? Duration.ofSeconds(config.timeoutSeconds()) : defaults.getTimeout();
+        // null — без таймаута: единственный источник ограничения по времени — config.timeoutSeconds шага
+        Duration timeout = config.timeoutSeconds() != null ? Duration.ofSeconds(config.timeoutSeconds()) : null;
 
         log.info("Шаг '{}' (id={}): проверка очереди '{}', ожидание={}, minTotalCount={}, naturalKeys={}"
                         + " (prefix={}), timeout={}",
-                step.getName(), step.getId(), queueName, expected, minTotalCount, naturalKeyFilter, prefixMatch, timeout);
+                step.getName(), step.getId(), queueName, expected, minTotalCount, naturalKeyFilter, prefixMatch,
+                timeout == null ? "не ограничен" : timeout);
 
         try {
             progressReporter.report(stepRun, "Ищу/создаю очередь '" + queueName + "' для проверки");
@@ -115,7 +116,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
             int maxRetray,
             Duration interval,
             Duration timeout) {
-        Instant deadline = Instant.now().plus(timeout);
+        Instant deadline = timeout == null ? null : Instant.now().plus(timeout);
         Map<String, Long> actualCounts;
         int actualTotal;
         int attempt = 0;
@@ -157,7 +158,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
             previousAttemptWasStableTerminalAndUnsatisfied = allTerminalNow;
             previousMatchedTotal = actualTotal;
 
-            if (Instant.now().isAfter(deadline)) {
+            if (deadline != null && Instant.now().isAfter(deadline)) {
                 throw new StepExecutionException("Проверка очереди '" + queueName
                         + "' не прошла за отведённое время. "
                         + OrchestratorNarration.describeCheckResult(expected, minTotalCount, actualCounts, actualTotal));
