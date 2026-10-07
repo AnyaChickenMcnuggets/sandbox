@@ -567,6 +567,20 @@ Windows-консоль ломала кириллицу в выводе, поэт
       менять) падали — третий робот в них заменён на `RUNNING`
 - [x] 306 тестов (+4 `RequestLoggingFilterTest`), `mvn verify` — зелёный
 
+## Sprint 31 — Список прогонов, `triggeredBy` в ответе — DONE
+- [x] `GET /api/v1/runs?scenarioId&page&size` (право `RUN_READ`): `PageResponse` (`common/web`),
+      строка — `RunSummaryResponse` (без `steps`, чтобы список не грузил шаги каждого прогона).
+      Сортировка `startedAt` DESC NULLS FIRST (ещё не начавшийся `PENDING` — самый новый), потом
+      `id` DESC. `size` 1..100 (по умолчанию 20), `page >= 0`, иначе `400`. Неизвестный
+      `scenarioId` — пустая страница, не `404`.
+- [x] `RunResponse` получил `triggeredBy` (`scenarioName` уже был). Раньше `triggeredBy` хранился в
+      БД, но в ответ API не попадал.
+- [x] `SecurityConfig`: `GET /api/v1/runs` явно в матчере `RUN_READ` рядом с `/api/v1/runs/**`
+- [x] Тесты: `ExecutionServiceTest` (сортировка, фильтр, границы, `triggeredBy`),
+      `RunControllerTest` (страница, параметры, 400), `SecurityConfigAuthorizationTest` (право,
+      401). Репозиторный тест на реальной БД не добавлен (Docker недоступен) — сортировку с
+      `NULLS FIRST` на Postgres стоит проверить на стенде.
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

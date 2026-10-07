@@ -1,6 +1,10 @@
 spring:
   application:
     name: rpa-test-automation
+  autoconfigure:
+    # Без этого Boot создаёт пользователя user со случайным паролем в логе. Он не используется:
+    # вход идёт через свой AuthService (app_user) и JwtAuthenticationFilter, не через UserDetailsService.
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:rpa_test_automation}
     username: ${DB_USER:rpa_test}
@@ -34,9 +38,9 @@ server:
     enabled: true
     certificate: ${SSL_CERTIFICATE:}
     certificate-private-key: ${SSL_CERTIFICATE_PRIVATE_KEY:}
-    compression:
-      enabled: true
-      mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
 auth:
   jwt:
     # HS256 ключ подписи — минимум 32 байта, иначе JwtService откажет при старте (см. ADR 0003).
@@ -126,6 +130,8 @@ logging:
     # поллинга — статус задания и проверки очереди). DEBUG (com.rpatest.execution.engine) — ещё
     # подробнее, но по сути дублирует то, что уже видно в detail шага через GET /api/v1/runs/{id}.
     com.rpatest: INFO
+    # Jasypt печатает десятки INFO-строк про каждый PropertySource при старте — только шум.
+    com.ulisesbocchio.jasyptspringboot: WARN
 
 jasypt:
   encryptor:

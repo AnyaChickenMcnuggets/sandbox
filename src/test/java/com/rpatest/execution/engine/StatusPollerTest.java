@@ -130,15 +130,24 @@ class StatusPollerTest {
 
     @Test
     void explicitIntervalOverridesDefault() {
-        // интервал из сценария (1мс) вместо orchestrator.polling.interval (10мс) — 150мс таймаут
-        // успевает сделать заметно больше опросов
+        // Интервал по умолчанию — 1 час: если бы он использовался, второго опроса не было бы
+        // никогда. Явный интервал из сценария (1мс) даёт несколько опросов в пределах таймаута —
+        // без привязки к скорости машины/консоли.
+        OrchestratorProperties slowDefault = new OrchestratorProperties();
+        slowDefault.getPolling().setInterval(Duration.ofHours(1));
+        StatusPoller pollerWithSlowDefault = new StatusPoller(
+                rpaProjectLaunchesPort,
+                new OrchestratorLookup(mock(RpaProjectsPort.class), rpaProjectQueuePort),
+                new StepProgressReporter(mock(StepRunRepository.class)),
+                slowDefault);
         when(rpaProjectLaunchesPort.getByAssignment(1)).thenReturn(List.of());
         when(rpaProjectQueuePort.findByAssignment(1)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, Duration.ofMillis(1)))
+        assertThatThrownBy(() ->
+                pollerWithSlowDefault.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, Duration.ofMillis(1)))
                 .isInstanceOf(StepExecutionException.class);
 
-        org.mockito.Mockito.verify(rpaProjectLaunchesPort, org.mockito.Mockito.atLeast(30)).getByAssignment(1);
+        org.mockito.Mockito.verify(rpaProjectLaunchesPort, org.mockito.Mockito.atLeast(2)).getByAssignment(1);
     }
 
     private RpaProjectLaunchDto launch(LocalDateTime startedAt, boolean success) {

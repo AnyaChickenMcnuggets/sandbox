@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rpatest.auth.domain.AppUser;
 import com.rpatest.auth.domain.Permission;
 import com.rpatest.auth.domain.Role;
+import com.rpatest.common.web.PageResponse;
 import com.rpatest.auth.service.AppUserService;
 import com.rpatest.auth.service.AuthService;
 import com.rpatest.auth.service.JwtService;
@@ -175,7 +176,7 @@ class SecurityConfigAuthorizationTest {
     @Test
     @WithMockUser(roles = "OPERATOR")
     void operatorCanStartRunStopRunAndCleanup() throws Exception {
-        RunResponse run = new RunResponse(1L, 5L, "s", RunStatus.PENDING, null, null, null, List.of());
+        RunResponse run = new RunResponse(1L, 5L, "s", "alice", RunStatus.PENDING, null, null, null, List.of());
         when(executionService.startRun(eq(5L), any(), any())).thenReturn(run);
         when(executionService.stopRun(1L)).thenReturn(run);
         when(cleanupService.cleanupLastRun(5L)).thenReturn(List.of());
@@ -189,11 +190,27 @@ class SecurityConfigAuthorizationTest {
     @WithMockUser(roles = "VIEWER")
     void viewerCanReadRunsAndOrchestratorAvailability() throws Exception {
         when(executionService.getRun(1L)).thenReturn(
-                new RunResponse(1L, 5L, "s", RunStatus.PENDING, null, null, null, List.of()));
+                new RunResponse(1L, 5L, "s", "alice", RunStatus.PENDING, null, null, null, List.of()));
         when(executionService.getRobotAvailability()).thenReturn(new RobotAvailabilityResponse(2, 3, 2, true));
 
         mockMvc.perform(get("/api/v1/runs/1")).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/orchestrator/robots-availability")).andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void runsListIsGuardedByRunReadPermission() throws Exception {
+        when(executionService.listRuns(null, 0, 20)).thenReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+
+        mockMvc.perform(get("/api/v1/runs")).andExpect(status().isOk());
+
+        when(rolePermissionService.permissionsOf(Role.VIEWER)).thenReturn(Set.of(Permission.SCENARIO_READ));
+        mockMvc.perform(get("/api/v1/runs")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void runsListRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/runs")).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -239,7 +256,7 @@ class SecurityConfigAuthorizationTest {
         widened.add(Permission.RUN_START);
         when(rolePermissionService.permissionsOf(Role.VIEWER)).thenReturn(widened);
         when(executionService.startRun(eq(5L), any(), any())).thenReturn(
-                new RunResponse(1L, 5L, "s", RunStatus.PENDING, null, null, null, List.of()));
+                new RunResponse(1L, 5L, "s", "alice", RunStatus.PENDING, null, null, null, List.of()));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run")).andExpect(status().isAccepted());
     }

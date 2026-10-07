@@ -3,6 +3,7 @@ package com.rpatest.execution.service;
 import com.rpatest.common.exception.ConflictException;
 import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
+import com.rpatest.common.web.PageResponse;
 import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
@@ -12,6 +13,7 @@ import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.execution.web.RobotAvailabilityResponse;
 import com.rpatest.execution.web.RunResponse;
+import com.rpatest.execution.web.RunSummaryResponse;
 import com.rpatest.execution.web.StepRunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
 import com.rpatest.orchestrator.client.RobotsPort;
@@ -27,11 +29,17 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ExecutionService {
+
+    static final int MAX_PAGE_SIZE = 100;
 
     private final TestScenarioRepository scenarioRepository;
     private final ScenarioRunRepository runRepository;
@@ -111,6 +119,28 @@ public class ExecutionService {
         Long runId = run.getId();
         executor.execute(() -> engine.runScenario(runId, startStepId));
         return toResponse(run, List.of());
+    }
+
+    /**
+     * Newest first by {@code startedAt}; runs that are still {@code PENDING} (no {@code startedAt}
+     * yet) are the newest of all, so they come first ({@code nullsFirst}, stated explicitly instead of
+     * relying on the DB default). {@code id} breaks ties, so paging is stable. An unknown
+     * {@code scenarioId} gives an empty page, not 404: history outlives a deleted scenario.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<RunSummaryResponse> listRuns(Long scenarioId, int page, int size) {
+        if (page < 0) {
+            throw new InvalidRequestException("page must be >= 0");
+        }
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new InvalidRequestException("size must be between 1 and " + MAX_PAGE_SIZE);
+        }
+        Pageable pageable = PageRequest.of(page, size,
+                Sort.by(Sort.Order.desc("startedAt").nullsFirst(), Sort.Order.desc("id")));
+        Page<ScenarioRun> runs = scenarioId == null
+                ? runRepository.findAll(pageable)
+                : runRepository.findByScenarioId(scenarioId, pageable);
+        return PageResponse.of(runs, RunSummaryResponse::from);
     }
 
     @Transactional(readOnly = true)
@@ -193,7 +223,7 @@ public class ExecutionService {
                         s.getErrorMessage(),
                         s.isOrchestratorQueueOwned()))
                 .toList();
-        return new RunResponse(run.getId(), run.getScenarioId(), run.getScenarioName(), run.getStatus(),
-                run.getStartedAt(), run.getFinishedAt(), run.getStartStepId(), stepResponses);
+        return new RunResponse(run.getId(), run.getScenarioId(), run.getScenarioName(), run.getTriggeredBy(),
+                run.getStatus(), run.getStartedAt(), run.getFinishedAt(), run.getStartStepId(), stepResponses);
     }
 }

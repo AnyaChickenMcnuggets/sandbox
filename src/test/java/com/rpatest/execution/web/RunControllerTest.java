@@ -10,8 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.rpatest.auth.service.JwtService;
 import com.rpatest.common.exception.ConflictException;
+import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
 import com.rpatest.common.web.GlobalExceptionHandler;
+import com.rpatest.common.web.PageResponse;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.service.ExecutionService;
 import com.rpatest.execution.service.QueueAuditService;
@@ -56,7 +58,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsAcceptedWithPendingRun() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.PENDING, null, null, null, List.of());
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", "alice", RunStatus.PENDING, null, null, null, List.of());
         when(executionService.startRun(eq(5L), any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
@@ -68,12 +70,50 @@ class RunControllerTest {
 
     @Test
     void runDerivesTriggeredByFromAuthenticatedPrincipalNotRequestBody() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.PENDING, null, null, null, List.of());
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", "alice", RunStatus.PENDING, null, null, null, List.of());
         when(executionService.startRun(eq(5L), eq("tester"), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/scenarios/5/run")).andExpect(status().isAccepted());
 
         org.mockito.Mockito.verify(executionService).startRun(5L, "tester", null);
+    }
+
+    @Test
+    void listRunsReturnsPageWithScenarioNameAndTriggeredByAndDefaults() throws Exception {
+        RunSummaryResponse row = new RunSummaryResponse(
+                3L, 5L, "Test Scenario", "alice", RunStatus.RUNNING, null, null, null);
+        when(executionService.listRuns(null, 0, 20))
+                .thenReturn(new PageResponse<>(List.of(row), 0, 20, 1, 1));
+
+        mockMvc.perform(get("/api/v1/runs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(3))
+                .andExpect(jsonPath("$.content[0].scenarioName").value("Test Scenario"))
+                .andExpect(jsonPath("$.content[0].triggeredBy").value("alice"))
+                .andExpect(jsonPath("$.content[0].steps").doesNotExist())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    @Test
+    void listRunsPassesFilterAndPagingParameters() throws Exception {
+        when(executionService.listRuns(5L, 2, 50)).thenReturn(new PageResponse<>(List.of(), 2, 50, 0, 0));
+
+        mockMvc.perform(get("/api/v1/runs").param("scenarioId", "5").param("page", "2").param("size", "50"))
+                .andExpect(status().isOk());
+
+        org.mockito.Mockito.verify(executionService).listRuns(5L, 2, 50);
+    }
+
+    @Test
+    void listRunsReturns400ForInvalidPaging() throws Exception {
+        when(executionService.listRuns(null, 0, 500)).thenThrow(new InvalidRequestException("size must be between 1 and 100"));
+
+        mockMvc.perform(get("/api/v1/runs").param("size", "500"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
 
     @Test
@@ -85,7 +125,7 @@ class RunControllerTest {
 
     @Test
     void stopReturnsStoppedRun() throws Exception {
-        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", RunStatus.STOPPED, null, null, null, List.of());
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", "alice", RunStatus.STOPPED, null, null, null, List.of());
         when(executionService.stopRun(1L)).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/runs/1/stop"))

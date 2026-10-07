@@ -90,7 +90,8 @@ public class SecurityConfig {
                         .access(permissions.has(Permission.SCENARIO_WRITE))
                         .requestMatchers(HttpMethod.POST, "/api/v1/runs/*/stop")
                         .access(permissions.has(Permission.RUN_STOP))
-                        .requestMatchers(HttpMethod.GET, "/api/v1/runs/**").access(permissions.has(Permission.RUN_READ))
+                        .requestMatchers(HttpMethod.GET, "/api/v1/runs", "/api/v1/runs/**")
+                        .access(permissions.has(Permission.RUN_READ))
                         .requestMatchers(HttpMethod.GET, "/api/v1/orchestrator/**")
                         .access(permissions.has(Permission.ORCHESTRATOR_READ))
                         // Всё остальное под нашими префиксами (другой метод/путь, которому не

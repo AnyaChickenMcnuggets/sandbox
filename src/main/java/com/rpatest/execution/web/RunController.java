@@ -1,5 +1,6 @@
 package com.rpatest.execution.web;
 
+import com.rpatest.common.web.PageResponse;
 import com.rpatest.execution.service.ExecutionService;
 import com.rpatest.execution.service.QueueAuditService;
 import java.util.List;
@@ -30,6 +31,14 @@ public class RunController {
         String triggeredBy = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(executionService.startRun(scenarioId, triggeredBy, startStepId));
+    }
+
+    @GetMapping("/api/v1/runs")
+    public PageResponse<RunSummaryResponse> listRuns(
+            @RequestParam(required = false) Long scenarioId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return executionService.listRuns(scenarioId, page, size);
     }
 
     @GetMapping("/api/v1/runs/{runId}")

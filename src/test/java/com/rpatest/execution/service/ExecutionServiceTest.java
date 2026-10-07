@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.rpatest.common.exception.ConflictException;
 import com.rpatest.common.exception.InvalidRequestException;
 import com.rpatest.common.exception.NotFoundException;
+import com.rpatest.common.web.PageResponse;
 import com.rpatest.config.OrchestratorProperties;
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
@@ -21,6 +23,7 @@ import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.execution.web.RobotAvailabilityResponse;
 import com.rpatest.execution.web.RunResponse;
+import com.rpatest.execution.web.RunSummaryResponse;
 import com.rpatest.execution.web.StepRunResponse;
 import com.rpatest.orchestrator.client.AssignmentsPort;
 import com.rpatest.orchestrator.client.RobotsPort;
@@ -39,6 +42,11 @@ import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 class ExecutionServiceTest {
 
@@ -305,6 +313,61 @@ class ExecutionServiceTest {
 
         assertThat(response.status()).isEqualTo(RunStatus.SUCCEEDED);
         verify(assignmentsPort, never()).stop(anyInt());
+    }
+
+    @Test
+    void listRunsWithoutFilterSortsByStartedAtDescNullsFirstThenIdDesc() {
+        ScenarioRun first = new ScenarioRun(5L, "alice", null, "Scenario A");
+        setId(first, 7L);
+        Page<ScenarioRun> page = new PageImpl<>(List.of(first), PageRequest.of(1, 10), 11);
+        when(runRepository.findAll(any(Pageable.class))).thenReturn(page);
+
+        PageResponse<RunSummaryResponse> result = service.listRuns(null, 1, 10);
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(runRepository).findAll(pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(10);
+        Sort.Order startedAt = pageable.getValue().getSort().getOrderFor("startedAt");
+        assertThat(startedAt.getDirection()).isEqualTo(Sort.Direction.DESC);
+        assertThat(startedAt.getNullHandling()).isEqualTo(Sort.NullHandling.NULLS_FIRST);
+        assertThat(pageable.getValue().getSort().getOrderFor("id").getDirection()).isEqualTo(Sort.Direction.DESC);
+        assertThat(result.totalElements()).isEqualTo(11);
+        assertThat(result.totalPages()).isEqualTo(2);
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(10);
+        assertThat(result.content()).singleElement().satisfies(row -> {
+            assertThat(row.id()).isEqualTo(7L);
+            assertThat(row.scenarioName()).isEqualTo("Scenario A");
+            assertThat(row.triggeredBy()).isEqualTo("alice");
+            assertThat(row.status()).isEqualTo(RunStatus.PENDING);
+        });
+    }
+
+    @Test
+    void listRunsFiltersByScenarioWhenScenarioIdGiven() {
+        when(runRepository.findByScenarioId(eq(5L), any(Pageable.class))).thenReturn(Page.empty());
+
+        PageResponse<RunSummaryResponse> result = service.listRuns(5L, 0, 20);
+
+        assertThat(result.content()).isEmpty();
+        verify(runRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    void listRunsRejectsNegativePageAndOutOfRangeSize() {
+        assertThatThrownBy(() -> service.listRuns(null, -1, 20)).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> service.listRuns(null, 0, 0)).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> service.listRuns(null, 0, 101)).isInstanceOf(InvalidRequestException.class);
+        verify(runRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    void getRunExposesTriggeredBy() {
+        when(runRepository.findById(100L)).thenReturn(Optional.of(run(100L, 1L)));
+        when(stepRunRepository.findByScenarioRunId(100L)).thenReturn(List.of());
+
+        assertThat(service.getRun(100L).triggeredBy()).isEqualTo("tester");
     }
 
     private ScenarioRun run(Long id, Long scenarioId) {
