@@ -58,18 +58,18 @@ public class StatusPoller {
             List<RpaProjectLaunchDto> launches = rpaProjectLaunchesPort.getByAssignment(assignmentId);
             RpaProjectLaunchDto latest = latestLaunch(launches);
             if (latest != null && latest.isTerminal()) {
-                progressReporter.report(stepRun, "Задание '" + assignmentLabel + "' завершилось на роботе '"
-                        + latest.robotName() + "': " + (latest.isSuccess() ? "успешно" : "с ошибкой"));
+                progressReporter.report(stepRun, "Assignment '" + assignmentLabel + "' finished on robot '"
+                        + latest.robotName() + "': " + (latest.isSuccess() ? "successfully" : "with an error"));
                 return latest;
             }
 
             String state = describeState(assignmentId, latest);
-            log.debug("Попытка #{} опроса задания '{}' (id={}): {}", attempt, assignmentLabel, assignmentId, state);
-            progressReporter.report(stepRun, "Задание '" + assignmentLabel + "' " + state + " (попытка #" + attempt + ")");
+            log.debug("Poll attempt #{} for assignment '{}' (id={}): {}", attempt, assignmentLabel, assignmentId, state);
+            progressReporter.report(stepRun, "Assignment '" + assignmentLabel + "' " + state + " (attempt #" + attempt + ")");
 
             if (deadline != null && Instant.now().isAfter(deadline)) {
                 throw new StepExecutionException(
-                        "Таймаут ожидания завершения задания '" + assignmentLabel + "'. Последнее известное состояние: "
+                        "Timed out waiting for assignment '" + assignmentLabel + "' to finish. Last known state: "
                                 + state);
             }
             sleep(pollInterval);
@@ -92,7 +92,7 @@ public class StatusPoller {
             Thread.sleep(duration.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new StepExecutionException("Ожидание завершения задания было прервано", e);
+            throw new StepExecutionException("Wait for assignment completion was interrupted", e);
         }
     }
 }

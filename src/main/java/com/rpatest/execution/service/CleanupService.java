@@ -62,7 +62,7 @@ public class CleanupService {
         try {
             action.run();
         } catch (OrchestratorApiException e) {
-            log.warn("Не удалось удалить {} при cleanup", description, e);
+            log.warn("Failed to delete {} during cleanup", description, e);
             failures.add(description + ": " + e.getMessage());
         }
     }

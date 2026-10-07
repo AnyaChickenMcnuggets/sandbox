@@ -31,6 +31,6 @@ public enum RobotRunStatus {
                 return status;
             }
         }
-        throw new IllegalArgumentException("Неизвестный RunStatus робота код: " + code);
+        throw new IllegalArgumentException("Unknown robot RunStatus code: " + code);
     }
 }

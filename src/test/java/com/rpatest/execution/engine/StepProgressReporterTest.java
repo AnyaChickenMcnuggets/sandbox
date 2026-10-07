@@ -16,9 +16,9 @@ class StepProgressReporterTest {
         StepProgressReporter reporter = new StepProgressReporter(stepRunRepository);
         StepRun stepRun = new StepRun(1L, 2L);
 
-        reporter.report(stepRun, "выполняется на роботе X");
+        reporter.report(stepRun, "running on robot X");
 
-        assertThat(stepRun.getDetail()).isEqualTo("выполняется на роботе X");
+        assertThat(stepRun.getDetail()).isEqualTo("running on robot X");
         assertThat(stepRun.getDetailUpdatedAt()).isNotNull();
         verify(stepRunRepository).save(stepRun);
     }

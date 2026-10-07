@@ -28,7 +28,7 @@ public class ExchangeQueueProvisioner {
                             new ExchangeQueueCreateDto(queueName, description, true, ttl, maxRetray, false, true));
                     ExchangeQueueDto queue = exchangeQueuesPort.findByName(queueName)
                             .orElseThrow(() -> new StepExecutionException(
-                                    "Очередь '" + queueName + "' не найдена в оркестраторе сразу после создания"));
+                                    "Queue '" + queueName + "' not found in the orchestrator right after creation"));
                     return new Result(queue, true);
                 });
     }

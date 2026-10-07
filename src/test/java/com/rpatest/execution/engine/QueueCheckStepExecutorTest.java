@@ -325,7 +325,7 @@ class QueueCheckStepExecutorTest {
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))
                 .isInstanceOf(StepExecutionException.class)
-                .hasMessageContaining("уже получили конечный статус");
+                .hasMessageContaining("already have a final status");
 
         // один опрос, показавший "всё конечное и недостаточно", + один подтверждающий — не 15,
         // которые набежали бы за timeout=150ms/interval=10ms без досрочного выхода
@@ -347,7 +347,7 @@ class QueueCheckStepExecutorTest {
 
         assertThatThrownBy(() -> executor.execute(stepRun, step))
                 .isInstanceOf(StepExecutionException.class)
-                .hasMessageContaining("не прошла за отведённое время");
+                .hasMessageContaining("did not pass within the allotted time");
 
         verify(exchangeQueuesPort, org.mockito.Mockito.atLeast(5)).listItems(queueId, 0, 200);
     }

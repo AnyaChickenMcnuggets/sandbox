@@ -29,7 +29,7 @@ public enum AssignmentStatus {
                 return status;
             }
         }
-        throw new IllegalArgumentException("Неизвестный AssignmentStatus код: " + code);
+        throw new IllegalArgumentException("Unknown AssignmentStatus code: " + code);
     }
 
     public boolean isTerminal() {

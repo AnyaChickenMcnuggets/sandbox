@@ -14,7 +14,7 @@ final class OrchestratorClientSupport {
         try {
             return call.get();
         } catch (RestClientException e) {
-            throw new OrchestratorApiException("Ошибка вызова оркестратора: " + operationDescription, e);
+            throw new OrchestratorApiException("Orchestrator call failed: " + operationDescription, e);
         }
     }
 }

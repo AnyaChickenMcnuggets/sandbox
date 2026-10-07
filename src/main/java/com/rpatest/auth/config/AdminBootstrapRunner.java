@@ -37,11 +37,11 @@ public class AdminBootstrapRunner implements CommandLineRunner {
             return;
         }
         if (properties.getPassword() == null || properties.getPassword().isBlank()) {
-            log.warn("Таблица app_user пуста, но auth.bootstrap-admin.password не задан — "
-                    + "первый ADMIN не создан, войти в систему будет некому");
+            log.warn("Table app_user is empty but auth.bootstrap-admin.password is not set - "
+                    + "the first ADMIN was not created, nobody will be able to log in");
             return;
         }
         appUserService.create(properties.getUsername(), properties.getPassword(), Role.ADMIN);
-        log.warn("Создан первый ADMIN '{}' — смените пароль сразу после первого входа", properties.getUsername());
+        log.warn("Created the first ADMIN '{}' - change the password right after the first login", properties.getUsername());
     }
 }

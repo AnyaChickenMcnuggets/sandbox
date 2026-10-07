@@ -549,6 +549,24 @@ CASCADE` — удаление сценария и без всякого ново
       дольше прежнего дефолта, таймаут/интервал из конфига шага)
 - [x] 302 теста (было 269), `mvn verify` (JaCoCo) — зелёный
 
+## Sprint 30 — Английские логи, логирование каждого запроса — DONE
+Windows-консоль ломала кириллицу в выводе, поэтому всё, что попадает в терминал, переведено на
+английский.
+- [x] Переведено на английский: все `log.*`-сообщения, `StepRun.detail` (дублируется в лог через
+      `StepProgressReporter`), `OrchestratorNarration`, сообщения `StepExecutionException`/
+      `OrchestratorApiException`/`OrchestratorAuthException` (попадают в стектрейсы). Сообщения,
+      которые видит только вызывающий API (`NotFoundException`, `ConflictException`, валидация,
+      401/403, описания прав) — оставлены на русском, в терминал они не попадают. Комментарии в
+      коде тоже не трогались.
+- [x] `RequestLoggingFilter` (`common/web`): на каждый запрос две строки — `--> METHOD URI from
+      user=... ip=...` и `<-- METHOD URI status=... user=... ip=... took N ms`. Не `@Component`:
+      добавлен в security-цепочку сразу после `JwtAuthenticationFilter`, чтобы пользователь был уже
+      известен, а 401/403 тоже попадали в лог. Заголовки, куки и тела не логируются.
+- [x] `ExecutionServiceTest`: два теста держали устаревшее допущение (`UNAVAILABLE` — не свободен),
+      после коммита `587cd05` (`RobotDto.isFree` намеренно считает `UNAVAILABLE` свободным — не
+      менять) падали — третий робот в них заменён на `RUNNING`
+- [x] 306 тестов (+4 `RequestLoggingFilterTest`), `mvn verify` — зелёный
+
 ## Открытые риски
 - ~~Точный формат ответа `POST /api/Account`~~ — подтверждено: запрос `{userName, password}`,
   ответ `{"token": "<jwt>"}`. `LoginDto` упрощён под это (без `robotEdition`/`refreshToken`).

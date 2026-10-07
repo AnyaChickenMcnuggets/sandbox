@@ -51,14 +51,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(OrchestratorAuthException.class)
     public ResponseEntity<ErrorResponse> handleOrchestratorAuth(OrchestratorAuthException e) {
-        log.error("Ошибка аутентификации в оркестраторе", e);
+        log.error("Orchestrator authentication failed", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ErrorResponse.of("ORCHESTRATOR_AUTH_FAILED", e.getMessage()));
     }
 
     @ExceptionHandler(OrchestratorApiException.class)
     public ResponseEntity<ErrorResponse> handleOrchestratorApi(OrchestratorApiException e) {
-        log.error("Ошибка вызова оркестратора", e);
+        log.error("Orchestrator call failed", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ErrorResponse.of("ORCHESTRATOR_API_ERROR", e.getMessage()));
     }

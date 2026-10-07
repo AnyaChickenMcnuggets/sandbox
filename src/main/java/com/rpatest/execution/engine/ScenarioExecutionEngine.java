@@ -71,10 +71,10 @@ public class ScenarioExecutionEngine {
      */
     public void runScenario(Long runId, Long startStepId) {
         ScenarioRun run = runRepository.findById(runId)
-                .orElseThrow(() -> new StepExecutionException("ScenarioRun не найден: " + runId));
+                .orElseThrow(() -> new StepExecutionException("ScenarioRun not found: " + runId));
         run.markRunning();
         runRepository.save(run);
-        log.info("Прогон {} (сценарий {}) запущен", runId, run.getScenarioId());
+        log.info("Run {} (scenario {}) started", runId, run.getScenarioId());
 
         try {
             List<ScenarioStep> steps = stepRepository.findByScenarioIdOrderByPosition(run.getScenarioId());
@@ -106,15 +106,15 @@ public class ScenarioExecutionEngine {
                 ScenarioStep startStep = stepsById.get(startStepId);
                 if (startStep == null) {
                     throw new StepExecutionException(
-                            "Шаг " + startStepId + " не найден в сценарии " + run.getScenarioId());
+                            "Step " + startStepId + " not found in scenario " + run.getScenarioId());
                 }
                 roots = List.of(startStep);
-                log.info("Прогон {}: запуск начат вручную с шага '{}' (id={}), а не с корня DAG",
+                log.info("Run {}: started manually from step '{}' (id={}) instead of the DAG roots",
                         runId, startStep.getName(), startStepId);
             } else {
                 roots = steps.stream().filter(s -> !hasIncoming.contains(s.getId())).toList();
             }
-            log.info("Прогон {}: {} шаг(ов) всего, {} корневых: {}", runId, steps.size(), roots.size(),
+            log.info("Run {}: {} step(s) in total, {} root(s): {}", runId, steps.size(), roots.size(),
                     roots.stream().map(ScenarioStep::getName).toList());
 
             // Шаги, недостижимые из корней этого прогона (например, ветки "до" startStepId), не
@@ -131,9 +131,9 @@ public class ScenarioExecutionEngine {
             boolean anyFailed = stepRunRepository.findByScenarioRunId(runId).stream()
                     .anyMatch(sr -> sr.getStatus() == RunStatus.FAILED);
             run.finish(anyFailed ? RunStatus.FAILED : RunStatus.SUCCEEDED);
-            log.info("Прогон {} завершён со статусом {}", runId, run.getStatus());
+            log.info("Run {} finished with status {}", runId, run.getStatus());
         } catch (Exception e) {
-            log.error("Прогон сценария {} завершился с ошибкой движка", runId, e);
+            log.error("Scenario run {} failed with an engine error", runId, e);
             run.finish(RunStatus.FAILED);
         } finally {
             runRepository.save(run);
@@ -196,8 +196,8 @@ public class ScenarioExecutionEngine {
                         boolean allParentsSucceeded = parentFutures.stream()
                                 .allMatch(f -> f.join() == RunStatus.SUCCEEDED);
                         if (!allParentsSucceeded) {
-                            log.info("Прогон {}: шаг '{}' (id={}) не запущен — не все предшественники "
-                                            + "(fan-in) этого прогона завершились успешно, шаг остаётся PENDING",
+                            log.info("Run {}: step '{}' (id={}) not started - not all of its fan-in "
+                                            + "predecessors in this run succeeded, the step stays PENDING",
                                     run.getId(), step.getName(), stepId);
                             return CompletableFuture.completedFuture(RunStatus.FAILED);
                         }
@@ -213,15 +213,15 @@ public class ScenarioExecutionEngine {
                 .orElseGet(() -> new StepRun(run.getId(), step.getId(), step.getName(), step.getType()));
         stepRun.markRunning();
         stepRun = stepRunRepository.save(stepRun);
-        log.info("Прогон {}: шаг '{}' (id={}, тип={}) начат", run.getId(), step.getName(), step.getId(), step.getType());
+        log.info("Run {}: step '{}' (id={}, type={}) started", run.getId(), step.getName(), step.getId(), step.getType());
 
         StepExecutor stepExecutor = executorsByType.get(step.getType());
         try {
             stepExecutor.execute(stepRun, step);
             stepRun.markSucceeded();
-            log.info("Прогон {}: шаг '{}' (id={}) завершён успешно", run.getId(), step.getName(), step.getId());
+            log.info("Run {}: step '{}' (id={}) succeeded", run.getId(), step.getName(), step.getId());
         } catch (Exception e) {
-            log.warn("Шаг '{}' (id={}) прогона {} завершился с ошибкой", step.getName(), step.getId(), run.getId(), e);
+            log.warn("Step '{}' (id={}) of run {} failed", step.getName(), step.getId(), run.getId(), e);
             stepRun.markFailed(describeWithCauses(e));
         } finally {
             stepRunRepository.save(stepRun);
@@ -240,7 +240,7 @@ public class ScenarioExecutionEngine {
         Throwable cause = e.getCause();
         int depth = 0;
         while (cause != null && cause != e && depth < 5) {
-            sb.append(" — ").append(cause.getMessage());
+            sb.append(" - ").append(cause.getMessage());
             cause = cause.getCause();
             depth++;
         }

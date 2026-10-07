@@ -27,6 +27,6 @@ public enum ExchangeQueueValueEventType {
                 return type;
             }
         }
-        throw new IllegalArgumentException("Неизвестный ExchangeQueueValueEventType код: " + code);
+        throw new IllegalArgumentException("Unknown ExchangeQueueValueEventType code: " + code);
     }
 }

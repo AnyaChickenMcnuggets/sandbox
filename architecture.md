@@ -80,8 +80,9 @@ scenario_run 1───* step_run 1───* queue_item_result
 
 0. **Предусловие запуска: минимум свободных роботов.** Перед созданием `ScenarioRun`
    `ExecutionService.startRun` вызывает `GET /api/Robots/v2` (`RobotsPort`/`RobotsClient`, тот же
-   вызов, что и в эталонном `OrcService.getRpaRobots`) и считает роботов со `status == Idle`
-   (`RobotDto.isFree()`, mirrors `LTools.Enums.RunStatus`: `Unavailable`/`Idle`/`Running`). Если
+   вызов, что и в эталонном `OrcService.getRpaRobots`) и считает свободными роботов со `status == Idle` или
+   `Unavailable` (`RobotDto.isFree()`, mirrors `LTools.Enums.RunStatus`: `Unavailable`/`Idle`/
+   `Running`; `Unavailable` считается свободным намеренно — решение владельца проекта). Если
    свободных меньше `orchestrator.min-free-robots` (по умолчанию 2) — прогон не создаётся вообще,
    `409 CONFLICT` с текстом вида "свободно 1 из 3, требуется минимум 2". Смысл: без этого `JOB`-шаг
    уходил в `RpaProjectQueue` и висел там в ожидании робота (раньше — до скрытого таймаута в
@@ -438,7 +439,7 @@ scenario_run 1───* step_run 1───* queue_item_result
 | `orchestrator.credentials.username/password` | учётные данные (Jasypt `ENC(...)`) |
 | `orchestrator.polling.interval` | интервал опроса статуса Assignment (переопределяется `JOB.config.pollIntervalSeconds`). Глобального таймаута нет — только `JOB.config.timeoutSeconds` |
 | `orchestrator.queue-check-polling.interval` | интервал опроса очереди в `QUEUE_CHECK` (по умолчанию для шагов без своего `pollIntervalSeconds`). Глобального таймаута нет — только `QUEUE_CHECK.config.timeoutSeconds` |
-| `orchestrator.min-free-robots` | минимум свободных (Idle) роботов, при котором `POST .../run` вообще стартует прогон (иначе `409`), по умолчанию 2 |
+| `orchestrator.min-free-robots` | минимум свободных (Idle или Unavailable) роботов, при котором `POST .../run` вообще стартует прогон (иначе `409`), по умолчанию 2 |
 | `orchestrator.http.connect-timeout` / `read-timeout` | таймауты HTTP-клиента |
 | `orchestrator.tls.trusted-certificates` | пути к сертификатам CA оркестратора (`file:...`), если он за внутренним CA — иначе PKIX path building failed |
 | `resilience4j.retry.instances.orchestrator.*` | политика retry |

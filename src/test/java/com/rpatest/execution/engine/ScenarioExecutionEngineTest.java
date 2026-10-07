@@ -284,7 +284,7 @@ class ScenarioExecutionEngineTest {
 
             @Override
             public void execute(StepRun stepRun, ScenarioStep step) {
-                throw new StepExecutionException("Не удалось выполнить проверку очереди 'x'", rootCause);
+                throw new StepExecutionException("Failed to run queue check 'x'", rootCause);
             }
         };
 
@@ -295,7 +295,7 @@ class ScenarioExecutionEngineTest {
         engine.runScenario(10L);
 
         String errorMessage = savedStepRunsById.values().iterator().next().getErrorMessage();
-        assertThat(errorMessage).contains("Не удалось выполнить проверку очереди 'x'");
+        assertThat(errorMessage).contains("Failed to run queue check 'x'");
         assertThat(errorMessage).contains("500 [no body]");
     }
 

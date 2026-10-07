@@ -26,7 +26,7 @@ public class AuthResponseParser {
 
     public String extractToken(String rawBody) {
         if (rawBody == null || rawBody.isBlank()) {
-            throw new OrchestratorAuthException("Пустой ответ от оркестратора при аутентификации");
+            throw new OrchestratorAuthException("Empty orchestrator response during authentication");
         }
         String trimmed = rawBody.trim();
         if (looksLikeJson(trimmed)) {
@@ -52,9 +52,9 @@ public class AuthResponseParser {
                 }
             }
         } catch (Exception e) {
-            throw new OrchestratorAuthException("Не удалось разобрать ответ аутентификации оркестратора", e);
+            throw new OrchestratorAuthException("Failed to parse the orchestrator authentication response", e);
         }
-        throw new OrchestratorAuthException("Ответ аутентификации не содержит распознаваемого поля токена: " + value);
+        throw new OrchestratorAuthException("Authentication response has no recognizable token field: " + value);
     }
 
     private String stripQuotes(String value) {

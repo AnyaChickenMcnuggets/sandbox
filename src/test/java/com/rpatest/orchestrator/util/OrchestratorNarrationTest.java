@@ -28,14 +28,14 @@ class OrchestratorNarrationTest {
 
         String result = OrchestratorNarration.describeQueued(queued);
 
-        assertThat(result).contains("в очереди проектов").contains(createdAt.toString());
+        assertThat(result).contains("project queue").contains(createdAt.toString());
     }
 
     @Test
     void describesNotFoundWhenNoEntries() {
         String result = OrchestratorNarration.describeQueued(List.of());
 
-        assertThat(result).contains("не найдено ни в очереди проектов, ни среди запусков");
+        assertThat(result).contains("not found in the project queue nor among robot launches");
     }
 
     @Test
@@ -60,27 +60,27 @@ class OrchestratorNarrationTest {
     void describesExpectationWithThresholdsAndMinTotal() {
         String result = OrchestratorNarration.describeExpectation(Map.of("SUCCESS", 2), 5);
 
-        assertThat(result).contains("SUCCESS>=2").contains("всего >= 5");
+        assertThat(result).contains("SUCCESS>=2").contains("total >= 5");
     }
 
     @Test
     void describesExpectationAsNoneWhenEmpty() {
         String result = OrchestratorNarration.describeExpectation(Map.of(), null);
 
-        assertThat(result).isEqualTo("(без конкретных ожиданий по количеству)");
+        assertThat(result).isEqualTo("(no specific count expectations)");
     }
 
     @Test
     void describesActualCounts() {
         String result = OrchestratorNarration.describeActual(Map.of("SUCCESS", 3L), 3);
 
-        assertThat(result).contains("всего=3").contains("SUCCESS=3");
+        assertThat(result).contains("total=3").contains("SUCCESS=3");
     }
 
     @Test
     void describesCheckResultCombiningExpectedAndActual() {
         String result = OrchestratorNarration.describeCheckResult(Map.of("SUCCESS", 5), null, Map.of("SUCCESS", 2L), 2);
 
-        assertThat(result).contains("Ожидалось:").contains("SUCCESS>=5").contains("фактически:").contains("SUCCESS=2");
+        assertThat(result).contains("Expected:").contains("SUCCESS>=5").contains("actual:").contains("SUCCESS=2");
     }
 }

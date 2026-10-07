@@ -64,7 +64,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
     public void execute(StepRun stepRun, ScenarioStep step) {
         QueueCheckStepConfig config = objectMapper.convertValue(step.getConfig(), QueueCheckStepConfig.class);
         if (config.queueName() == null || config.queueName().isBlank()) {
-            throw new StepExecutionException("Не указано имя очереди для проверки в шаге '" + step.getName() + "'");
+            throw new StepExecutionException("No queue name to check in step '" + step.getName() + "'");
         }
         String queueName = OrchestratorNames.sanitize(config.queueName());
         Set<String> naturalKeyFilter = new HashSet<>(config.naturalKeysOrEmpty());
@@ -78,13 +78,13 @@ public class QueueCheckStepExecutor implements StepExecutor {
         // null — без таймаута: единственный источник ограничения по времени — config.timeoutSeconds шага
         Duration timeout = config.timeoutSeconds() != null ? Duration.ofSeconds(config.timeoutSeconds()) : null;
 
-        log.info("Шаг '{}' (id={}): проверка очереди '{}', ожидание={}, minTotalCount={}, naturalKeys={}"
+        log.info("Step '{}' (id={}): checking queue '{}', expected={}, minTotalCount={}, naturalKeys={}"
                         + " (prefix={}), timeout={}",
                 step.getName(), step.getId(), queueName, expected, minTotalCount, naturalKeyFilter, prefixMatch,
-                timeout == null ? "не ограничен" : timeout);
+                timeout == null ? "unlimited" : timeout);
 
         try {
-            progressReporter.report(stepRun, "Ищу/создаю очередь '" + queueName + "' для проверки");
+            progressReporter.report(stepRun, "Looking up/creating queue '" + queueName + "' for the check");
             // Get-or-create: если очередь ещё не создана предыдущим шагом (например, DAG собран
             // с QUEUE_CHECK раньше соответствующего QUEUE), проверка не должна падать — просто
             // ждём появления элементов в пустой (только что созданной) очереди до таймаута.
@@ -93,15 +93,15 @@ public class QueueCheckStepExecutor implements StepExecutor {
             // QUEUE_CHECK никогда не владеет очередью для целей cleanup — он либо переиспользует,
             // либо (get-or-create) создаёт пустую только чтобы было что поллить, но не "создаёт"
             // её в смысле "это моя очередь, которую можно удалить после прогона".
-            progressReporter.report(stepRun, "Очередь '" + queueName + "' (id=" + queue.id()
-                    + ") найдена, начинаю проверку. Ожидается: "
+            progressReporter.report(stepRun, "Queue '" + queueName + "' (id=" + queue.id()
+                    + ") found, starting the check. Expected: "
                     + OrchestratorNarration.describeExpectation(expected, minTotalCount));
 
             pollUntilSatisfied(stepRun, queue.id(), queueName, naturalKeyFilter, prefixMatch, expected, minTotalCount,
                     queue.maxRetrayOrZero(), interval, timeout);
         } catch (OrchestratorApiException e) {
-            log.error("Шаг '{}': ошибка вызова оркестратора при проверке очереди '{}'", step.getName(), queueName, e);
-            throw new StepExecutionException("Не удалось выполнить проверку очереди '" + step.getName() + "'", e);
+            log.error("Step '{}': orchestrator call failed while checking queue '{}'", step.getName(), queueName, e);
+            throw new StepExecutionException("Failed to run queue check '" + step.getName() + "'", e);
         }
     }
 
@@ -136,31 +136,31 @@ public class QueueCheckStepExecutor implements StepExecutor {
             actualTotal = matching.size();
 
             String actualDescription = OrchestratorNarration.describeActual(actualCounts, actualTotal);
-            log.debug("Попытка #{} проверки очереди '{}': {}", attempt, queueName, actualDescription);
-            progressReporter.report(stepRun, "Проверка очереди '" + queueName + "' (попытка #" + attempt + "): "
+            log.debug("Queue check attempt #{} for queue '{}': {}", attempt, queueName, actualDescription);
+            progressReporter.report(stepRun, "Checking queue '" + queueName + "' (attempt #" + attempt + "): "
                     + actualDescription);
 
             if (satisfies(expected, minTotalCount, actualCounts, actualTotal)) {
-                progressReporter.report(stepRun, "Проверка очереди '" + queueName + "' пройдена: " + actualDescription);
+                progressReporter.report(stepRun, "Queue check '" + queueName + "' passed: " + actualDescription);
                 return;
             }
 
             boolean allTerminalNow = !naturalKeyFilter.isEmpty() && isAllTerminal(matching, maxRetray);
             if (allTerminalNow && previousAttemptWasStableTerminalAndUnsatisfied && actualTotal == previousMatchedTotal) {
-                progressReporter.report(stepRun, "Проверка очереди '" + queueName
-                        + "' прекращена досрочно: все отслеживаемые транзакции (" + actualTotal
-                        + ") уже в конечном статусе, дальнейшее ожидание бессмысленно");
-                throw new StepExecutionException("Проверка очереди '" + queueName
-                        + "' не пройдена: все отслеживаемые транзакции уже получили конечный статус, "
-                        + "который не изменится. " + OrchestratorNarration.describeCheckResult(
+                progressReporter.report(stepRun, "Queue check '" + queueName
+                        + "' stopped early: all tracked transactions (" + actualTotal
+                        + ") already have a final status, further waiting is pointless");
+                throw new StepExecutionException("Queue check '" + queueName
+                        + "' failed: all tracked transactions already have a final status "
+                        + "that will not change. " + OrchestratorNarration.describeCheckResult(
                                 expected, minTotalCount, actualCounts, actualTotal));
             }
             previousAttemptWasStableTerminalAndUnsatisfied = allTerminalNow;
             previousMatchedTotal = actualTotal;
 
             if (deadline != null && Instant.now().isAfter(deadline)) {
-                throw new StepExecutionException("Проверка очереди '" + queueName
-                        + "' не прошла за отведённое время. "
+                throw new StepExecutionException("Queue check '" + queueName
+                        + "' did not pass within the allotted time. "
                         + OrchestratorNarration.describeCheckResult(expected, minTotalCount, actualCounts, actualTotal));
             }
             sleep(interval);
@@ -228,7 +228,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
             Thread.sleep(duration.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new StepExecutionException("Ожидание проверки очереди было прервано", e);
+            throw new StepExecutionException("Queue check wait was interrupted", e);
         }
     }
 }

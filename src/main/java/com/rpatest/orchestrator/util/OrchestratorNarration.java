@@ -20,15 +20,15 @@ public final class OrchestratorNarration {
     }
 
     public static String describeRunning(RpaProjectLaunchDto latest) {
-        return "выполняется на роботе '" + latest.robotName() + "' (начато " + latest.robotStartedAt() + ")";
+        return "running on robot '" + latest.robotName() + "' (started " + latest.robotStartedAt() + ")";
     }
 
     public static String describeQueued(List<QueueItemProjectDto> queueEntries) {
         if (!queueEntries.isEmpty()) {
-            return "в очереди проектов оркестратора (поставлено " + queueEntries.get(0).createdAt()
-                    + "), ожидание свободного робота";
+            return "in the orchestrator project queue (enqueued " + queueEntries.get(0).createdAt()
+                    + "), waiting for a free robot";
         }
-        return "не найдено ни в очереди проектов, ни среди запусков на роботах";
+        return "not found in the project queue nor among robot launches";
     }
 
     /** Суффикс с текстом ошибки из очереди проектов (`RpaProjectQueue.errorMsg`), либо пустая строка. */
@@ -45,20 +45,20 @@ public final class OrchestratorNarration {
         StringBuilder sb = new StringBuilder();
         expected.forEach((status, count) -> sb.append(status).append(">=").append(count).append(" "));
         if (minTotalCount != null) {
-            sb.append("(всего >= ").append(minTotalCount).append(")");
+            sb.append("(total >= ").append(minTotalCount).append(")");
         }
-        return sb.length() == 0 ? "(без конкретных ожиданий по количеству)" : sb.toString();
+        return sb.length() == 0 ? "(no specific count expectations)" : sb.toString();
     }
 
     public static String describeActual(Map<String, Long> actualCounts, int actualTotal) {
-        StringBuilder sb = new StringBuilder("всего=").append(actualTotal).append(" ");
+        StringBuilder sb = new StringBuilder("total=").append(actualTotal).append(" ");
         actualCounts.forEach((status, count) -> sb.append(status).append("=").append(count).append(" "));
         return sb.toString();
     }
 
     public static String describeCheckResult(
             Map<String, Integer> expected, Integer minTotalCount, Map<String, Long> actualCounts, int actualTotal) {
-        return "Ожидалось: " + describeExpectation(expected, minTotalCount) + " — фактически: "
+        return "Expected: " + describeExpectation(expected, minTotalCount) + " - actual: "
                 + describeActual(actualCounts, actualTotal);
     }
 }

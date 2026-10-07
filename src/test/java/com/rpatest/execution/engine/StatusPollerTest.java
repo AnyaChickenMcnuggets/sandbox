@@ -73,7 +73,7 @@ class StatusPollerTest {
 
         assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null))
                 .isInstanceOf(StepExecutionException.class)
-                .hasMessageContaining("в очереди проектов");
+                .hasMessageContaining("project queue");
     }
 
     @Test
@@ -83,7 +83,7 @@ class StatusPollerTest {
 
         assertThatThrownBy(() -> poller.pollUntilTerminal(stepRun, 1, "job-1", TIMEOUT, null))
                 .isInstanceOf(StepExecutionException.class)
-                .hasMessageContaining("не найдено ни в очереди проектов, ни среди запусков");
+                .hasMessageContaining("not found in the project queue nor among robot launches");
     }
 
     @Test

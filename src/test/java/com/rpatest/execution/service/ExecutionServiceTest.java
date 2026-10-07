@@ -72,7 +72,7 @@ class ExecutionServiceTest {
     void startRunThrowsConflictWhenFewerThanMinFreeRobots() {
         when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
         when(robotsPort.list()).thenReturn(List.of(
-                robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.RUNNING), robot(3, RobotRunStatus.UNAVAILABLE)));
+                robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.RUNNING), robot(3, RobotRunStatus.RUNNING)));
 
         assertThatThrownBy(() -> service.startRun(1L, "tester"))
                 .isInstanceOf(ConflictException.class)
@@ -125,7 +125,7 @@ class ExecutionServiceTest {
         // тот же снимок, который используют фронт для поллинга и сам запуск для решения — не
         // побочный эффект, не создаёт прогон, не бросает исключение
         when(robotsPort.list()).thenReturn(List.of(
-                robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.RUNNING), robot(3, RobotRunStatus.UNAVAILABLE)));
+                robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.RUNNING), robot(3, RobotRunStatus.RUNNING)));
 
         RobotAvailabilityResponse availability = service.getRobotAvailability();
 

@@ -58,7 +58,7 @@ public class AuthController {
     public MeResponse me() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         Role role = AuthenticationRoles.roleOf(authentication)
-                .orElseThrow(() -> new IllegalStateException("Аутентифицированный запрос без роли"));
+                .orElseThrow(() -> new IllegalStateException("Authenticated request without a role"));
         return new MeResponse(authentication.getName(), role, new TreeSet<>(rolePermissionService.permissionsOf(role)));
     }
 

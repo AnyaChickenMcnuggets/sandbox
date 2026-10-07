@@ -49,10 +49,10 @@ public class QueueStepExecutor implements StepExecutor {
         // Оркестратор принимает в имени очереди только латиницу/цифры/подчёркивание.
         String queueName = OrchestratorNames.sanitize(config.name());
         List<TransactionTemplate> transactions = config.transactionsOrEmpty();
-        log.info("Шаг '{}' (id={}): очередь '{}', транзакций к добавлению: {}",
+        log.info("Step '{}' (id={}): queue '{}', transactions to add: {}",
                 step.getName(), step.getId(), queueName, transactions.size());
         try {
-            progressReporter.report(stepRun, "Ищу/создаю очередь '" + queueName + "'");
+            progressReporter.report(stepRun, "Looking up/creating queue '" + queueName + "'");
             ExchangeQueueProvisioner.Result provisioned =
                     queueProvisioner.ensureExists(queueName, config.description(), config.ttl(), config.maxRetray());
             ExchangeQueueDto queue = provisioned.queue();
@@ -60,8 +60,8 @@ public class QueueStepExecutor implements StepExecutor {
             // На cleanup можно удалять только очередь, которую реально создал этот прогон — если
             // она уже существовала (переиспользована по имени), она не наша, чтобы её удалять.
             stepRun.setOrchestratorQueueOwned(provisioned.created());
-            log.info("Шаг '{}': очередь '{}' {}, id={}", step.getName(), queueName,
-                    provisioned.created() ? "создана" : "уже существовала (переиспользована)", queue.id());
+            log.info("Step '{}': queue '{}' {}, id={}", step.getName(), queueName,
+                    provisioned.created() ? "created" : "already existed (reused)", queue.id());
 
             int added = 0;
             for (TransactionTemplate transaction : transactions) {
@@ -69,13 +69,13 @@ public class QueueStepExecutor implements StepExecutor {
                         queueName,
                         EnqueueExchangeQueueDto.of(transaction.naturalKey(), transaction.value(), transaction.metadata()));
                 added++;
-                progressReporter.report(stepRun, "Добавлено транзакций: " + added + "/" + transactions.size()
-                        + " (последняя naturalKey='" + transaction.naturalKey() + "')");
+                progressReporter.report(stepRun, "Transactions added: " + added + "/" + transactions.size()
+                        + " (last naturalKey='" + transaction.naturalKey() + "')");
             }
-            progressReporter.report(stepRun, "Очередь '" + queueName + "' готова, добавлено транзакций: " + added);
+            progressReporter.report(stepRun, "Queue '" + queueName + "' is ready, transactions added: " + added);
         } catch (OrchestratorApiException e) {
-            log.error("Шаг '{}': ошибка вызова оркестратора при работе с очередью '{}'", step.getName(), queueName, e);
-            throw new StepExecutionException("Не удалось выполнить шаг очереди '" + step.getName() + "'", e);
+            log.error("Step '{}': orchestrator call failed while working with queue '{}'", step.getName(), queueName, e);
+            throw new StepExecutionException("Failed to execute queue step '" + step.getName() + "'", e);
         }
     }
 }

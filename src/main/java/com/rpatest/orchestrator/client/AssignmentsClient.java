@@ -42,7 +42,7 @@ public class AssignmentsClient implements AssignmentsPort {
                 .filter(a -> name.equals(a.name()))
                 .reduce((first, second) -> second)
                 .orElseThrow(() -> new OrchestratorApiException(
-                        "Задание '" + name + "' не найдено в оркестраторе после создания (пустой ответ POST)"));
+                        "Assignment '" + name + "' not found in the orchestrator after creation (empty POST response)"));
     }
 
     @Override

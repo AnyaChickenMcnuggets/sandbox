@@ -5,6 +5,7 @@ import com.rpatest.auth.domain.Permission;
 import com.rpatest.auth.service.PermissionAuthorization;
 import com.rpatest.auth.web.JwtAuthenticationFilter;
 import com.rpatest.common.web.ErrorResponse;
+import com.rpatest.common.web.RequestLoggingFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -99,7 +100,9 @@ public class SecurityConfig {
                         .denyAll()
                         // /api/v1/auth/me, /api/v1/auth/change-password — любой аутентифицированный
                         .anyRequest().authenticated())
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // После JWT-фильтра: пользователь уже известен, а 401/403 ещё пишутся ВНУТРИ нашего doFilter
+                .addFilterAfter(new RequestLoggingFilter(), JwtAuthenticationFilter.class);
         return http.build();
     }
 

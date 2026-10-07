@@ -62,7 +62,7 @@ public class JobStepExecutor implements StepExecutor {
     @Override
     public void execute(StepRun stepRun, ScenarioStep step) {
         JobStepConfig config = objectMapper.convertValue(step.getConfig(), JobStepConfig.class);
-        log.info("Шаг '{}' (id={}): начинаю выполнение JOB, config={}", step.getName(), step.getId(), config);
+        log.info("Step '{}' (id={}): starting JOB execution, config={}", step.getName(), step.getId(), config);
         try {
             validateProjectConfig(config, step);
             String projectLabel = orchestratorLookup.resolveProjectLabel(config.rpaProjectName(), config.rpaProjectId());
@@ -73,39 +73,39 @@ public class JobStepExecutor implements StepExecutor {
             // AssignmentsClient), а при повторном запуске того же сценария имя шага не уникально.
             String assignmentName = OrchestratorNames.sanitize(
                     step.getName() + "_" + stepRun.getScenarioRunId() + "_" + step.getId());
-            progressReporter.report(stepRun, "Создаю задание '" + assignmentName + "' по проекту '" + projectLabel + "'");
+            progressReporter.report(stepRun, "Creating assignment '" + assignmentName + "' for project '" + projectLabel + "'");
             AssignmentDto created = assignmentsPort.create(
                     AssignmentCreateDto.manualRun(assignmentName, step.getName(), rpaProjectId));
             stepRun.setOrchestratorAssignmentId(created.id());
-            log.info("Шаг '{}': создан Assignment id={} (name='{}')", step.getName(), created.id(), assignmentName);
+            log.info("Step '{}': created Assignment id={} (name='{}')", step.getName(), created.id(), assignmentName);
 
             applyArguments(stepRun, assignmentName, created.id(), config.argumentsOrEmpty());
 
-            progressReporter.report(stepRun, "Запускаю задание '" + assignmentName + "'");
+            progressReporter.report(stepRun, "Starting assignment '" + assignmentName + "'");
             assignmentsPort.start(created.id());
-            log.info("Шаг '{}': Assignment id={} запущен (Start), начинаю отслеживание", step.getName(), created.id());
+            log.info("Step '{}': Assignment id={} started (Start), tracking it now", step.getName(), created.id());
 
             Duration timeout = config.timeoutSeconds() != null ? Duration.ofSeconds(config.timeoutSeconds()) : null;
             Duration pollInterval =
                     config.pollIntervalSeconds() != null ? Duration.ofSeconds(config.pollIntervalSeconds()) : null;
             RpaProjectLaunchDto launch =
                     statusPoller.pollUntilTerminal(stepRun, created.id(), assignmentName, timeout, pollInterval);
-            log.info("Шаг '{}': Assignment id={} завершён, success={}, robot='{}'",
+            log.info("Step '{}': Assignment id={} finished, success={}, robot='{}'",
                     step.getName(), created.id(), launch.isSuccess(), launch.robotName());
             if (!launch.isSuccess()) {
-                throw new StepExecutionException("Задание завершилось с ошибкой на роботе '" + launch.robotName()
+                throw new StepExecutionException("Assignment failed on robot '" + launch.robotName()
                         + "'" + OrchestratorNarration.describeQueueError(orchestratorLookup.findQueueEntries(created.id())));
             }
         } catch (OrchestratorApiException e) {
-            log.error("Шаг '{}': ошибка вызова оркестратора", step.getName(), e);
-            throw new StepExecutionException("Не удалось выполнить шаг задания '" + step.getName() + "'", e);
+            log.error("Step '{}': orchestrator call failed", step.getName(), e);
+            throw new StepExecutionException("Failed to execute job step '" + step.getName() + "'", e);
         }
     }
 
     private void validateProjectConfig(JobStepConfig config, ScenarioStep step) {
         if (!config.hasProjectName() && config.rpaProjectId() == null) {
             throw new StepExecutionException(
-                    "В шаге '" + step.getName() + "' не указан ни rpaProjectName, ни rpaProjectId");
+                    "Step '" + step.getName() + "' has neither rpaProjectName nor rpaProjectId");
         }
     }
 
@@ -113,7 +113,7 @@ public class JobStepExecutor implements StepExecutor {
         if (arguments.isEmpty()) {
             return;
         }
-        progressReporter.report(stepRun, "Выставляю аргументы задания '" + assignmentName + "': " + arguments.keySet());
+        progressReporter.report(stepRun, "Setting assignment arguments '" + assignmentName + "': " + arguments.keySet());
         List<RpaProjectVariableDto> variables = rpaProjectVariablesPort.get(assignmentId);
         List<RpaProjectVariableEditByIdDto> edits = variables.stream()
                 .filter(v -> arguments.containsKey(v.name()))
@@ -121,9 +121,9 @@ public class JobStepExecutor implements StepExecutor {
                 .toList();
         if (!edits.isEmpty()) {
             rpaProjectVariablesPort.update(assignmentId, edits);
-            log.info("Задание '{}' (id={}): применено {} аргумент(ов)", assignmentName, assignmentId, edits.size());
+            log.info("Assignment '{}' (id={}): applied {} argument(s)", assignmentName, assignmentId, edits.size());
         } else {
-            log.warn("Задание '{}' (id={}): ни один из ключей {} не совпал с переменными проекта",
+            log.warn("Assignment '{}' (id={}): none of the keys {} matched project variables",
                     assignmentName, assignmentId, arguments.keySet());
         }
     }

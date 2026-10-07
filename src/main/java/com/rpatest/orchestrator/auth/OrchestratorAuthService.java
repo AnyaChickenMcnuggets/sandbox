@@ -67,7 +67,7 @@ public class OrchestratorAuthService {
             tokenProvider.update(token, jwtExpiryReader.readExpiry(token));
             return token;
         } catch (RestClientException e) {
-            throw new OrchestratorAuthException("Не удалось выполнить аутентификацию в оркестраторе", e);
+            throw new OrchestratorAuthException("Failed to authenticate in the orchestrator", e);
         }
     }
 }

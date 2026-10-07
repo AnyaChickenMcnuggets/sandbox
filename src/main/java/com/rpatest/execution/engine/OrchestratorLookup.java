@@ -35,7 +35,7 @@ public class OrchestratorLookup {
         if (projectName != null && !projectName.isBlank()) {
             return rpaProjectsPort.findByName(projectName)
                     .map(RpaProjectShortDto::id)
-                    .orElseThrow(() -> new StepExecutionException("Проект '" + projectName + "' не найден в оркестраторе"));
+                    .orElseThrow(() -> new StepExecutionException("Project '" + projectName + "' not found in the orchestrator"));
         }
         return projectId;
     }
