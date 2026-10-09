@@ -23,9 +23,18 @@ public class RunCompletionHandler {
         this.notifier = notifier;
     }
 
-    public void onRunFinished(Long runId) {
+    /** Whether the server can send report mails at all (checked before a run that asks for one). */
+    public boolean isMailAvailable() {
+        return notifier.isAvailable();
+    }
+
+    /** @param sendMail the run was started with the "mail me the report" attribute */
+    public void onRunFinished(Long runId, boolean sendMail) {
         try {
-            notifier.notifyFinished(reportService.rebuild(runId));
+            RunReportSnapshot report = reportService.rebuild(runId);
+            if (sendMail) {
+                notifier.notifyFinished(report);
+            }
         } catch (RuntimeException e) {
             log.error("Failed to build the report of run {}", runId, e);
         }

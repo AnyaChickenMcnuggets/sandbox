@@ -157,6 +157,7 @@ public class QueueCheckStepExecutor implements StepExecutor {
 
             boolean allTerminalNow = !naturalKeyFilter.isEmpty() && isAllTerminal(matching, maxRetray);
             if (allTerminalNow && previousAttemptWasStableTerminalAndUnsatisfied && actualTotal == previousMatchedTotal) {
+                markFailureReason(stepRun, "ALL_FINAL");
                 progressReporter.report(stepRun, "Queue check '" + queueName
                         + "' stopped early: all tracked transactions (" + actualTotal
                         + ") already have a final status, further waiting is pointless");
@@ -169,12 +170,21 @@ public class QueueCheckStepExecutor implements StepExecutor {
             previousMatchedTotal = actualTotal;
 
             if (deadline != null && Instant.now().isAfter(deadline)) {
+                markFailureReason(stepRun, "TIMEOUT");
                 throw new StepExecutionException("Queue check '" + queueName
                         + "' did not pass within the allotted time. "
                         + OrchestratorNarration.describeCheckResult(expected, minTotalCount, actualCounts, actualTotal));
             }
             sleep(interval);
         }
+    }
+
+    /** Why the check gave up (ALL_FINAL, TIMEOUT); the report turns it into a sentence. A copy is stored
+     * so the JSON column is surely seen as changed. */
+    private void markFailureReason(StepRun stepRun, String reason) {
+        Map<String, Object> result = new LinkedHashMap<>(stepRun.getResult());
+        result.put("failureReason", reason);
+        stepRun.setResult(result);
     }
 
     private Map<String, Object> describeResult(

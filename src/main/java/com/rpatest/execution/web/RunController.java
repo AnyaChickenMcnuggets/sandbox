@@ -28,9 +28,10 @@ public class RunController {
     @PostMapping("/api/v1/scenarios/{scenarioId}/run")
     public ResponseEntity<RunResponse> run(@PathVariable Long scenarioId, @RequestBody(required = false) RunRequest request) {
         Long startStepId = request != null ? request.startStepId() : null;
+        boolean sendReportByMail = request != null && Boolean.TRUE.equals(request.sendReportByMail());
         String triggeredBy = SecurityContextHolder.getContext().getAuthentication().getName();
         return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(executionService.startRun(scenarioId, triggeredBy, startStepId));
+                .body(executionService.startRun(scenarioId, triggeredBy, startStepId, sendReportByMail));
     }
 
     @GetMapping("/api/v1/runs")

@@ -106,6 +106,20 @@ public final class ReportText {
         };
     }
 
+    /** One color per status, shared by every diagram and legend of the report. */
+    public static String statusColor(RunStatus status) {
+        if (status == null) {
+            return "#9aa5b1";
+        }
+        return switch (status) {
+            case SUCCEEDED -> "#2f9e44";
+            case FAILED -> "#e03131";
+            case RUNNING -> "#1971c2";
+            case STOPPED -> "#f08c00";
+            case PENDING -> "#9aa5b1";
+        };
+    }
+
     public static long count(RunReportSnapshot snapshot, RunStatus status) {
         return snapshot.steps().stream().filter(s -> s.status() == status).count();
     }

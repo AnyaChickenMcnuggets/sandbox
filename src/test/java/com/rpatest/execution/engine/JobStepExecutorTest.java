@@ -302,7 +302,8 @@ class JobStepExecutorTest {
 
         assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
 
-        assertThat(stepRun.getResult()).containsEntry("robotName", "robot-9").containsEntry("success", false);
+        assertThat(stepRun.getResult()).containsEntry("robotName", "robot-9").containsEntry("success", false)
+                .containsEntry("robotError", null);
     }
 
     private RpaProjectLaunchDto successfulLaunch(int assignmentId) {

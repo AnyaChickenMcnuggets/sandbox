@@ -1,6 +1,7 @@
 package com.rpatest.execution.web;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,7 +60,7 @@ class RunControllerTest {
     @Test
     void runReturnsAcceptedWithPendingRun() throws Exception {
         RunResponse response = new RunResponse(1L, 5L, "Test Scenario", "alice", RunStatus.PENDING, null, null, null, List.of());
-        when(executionService.startRun(eq(5L), any(), any())).thenReturn(response);
+        when(executionService.startRun(eq(5L), any(), any(), anyBoolean())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isAccepted())
@@ -69,13 +70,36 @@ class RunControllerTest {
     }
 
     @Test
+    void runPassesTheMailFlagFromTheRequestBody() throws Exception {
+        RunResponse response = new RunResponse(1L, 5L, "Test Scenario", "tester", RunStatus.PENDING, null, null, null, List.of());
+        when(executionService.startRun(eq(5L), eq("tester"), any(), anyBoolean())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/scenarios/5/run").contentType("application/json")
+                        .content("{\"startStepId\":7,\"sendReportByMail\":true}"))
+                .andExpect(status().isAccepted());
+
+        org.mockito.Mockito.verify(executionService).startRun(5L, "tester", 7L, true);
+    }
+
+    @Test
+    void runReturns400WhenMailIsRequestedButNotAvailable() throws Exception {
+        when(executionService.startRun(eq(5L), any(), any(), eq(true)))
+                .thenThrow(new com.rpatest.common.exception.InvalidRequestException("mail is off"));
+
+        mockMvc.perform(post("/api/v1/scenarios/5/run").contentType("application/json")
+                        .content("{\"sendReportByMail\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
     void runDerivesTriggeredByFromAuthenticatedPrincipalNotRequestBody() throws Exception {
         RunResponse response = new RunResponse(1L, 5L, "Test Scenario", "alice", RunStatus.PENDING, null, null, null, List.of());
-        when(executionService.startRun(eq(5L), eq("tester"), any())).thenReturn(response);
+        when(executionService.startRun(eq(5L), eq("tester"), any(), anyBoolean())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/scenarios/5/run")).andExpect(status().isAccepted());
 
-        org.mockito.Mockito.verify(executionService).startRun(5L, "tester", null);
+        org.mockito.Mockito.verify(executionService).startRun(5L, "tester", null, false);
     }
 
     @Test
@@ -135,7 +159,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsConflictWhenServiceReportsConflict() throws Exception {
-        when(executionService.startRun(eq(5L), any(), any())).thenThrow(new ConflictException("уже выполняется"));
+        when(executionService.startRun(eq(5L), any(), any(), anyBoolean())).thenThrow(new ConflictException("уже выполняется"));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isConflict())
@@ -144,7 +168,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsBadGatewayOnOrchestratorApiError() throws Exception {
-        when(executionService.startRun(eq(5L), any(), any())).thenThrow(new OrchestratorApiException("недоступен"));
+        when(executionService.startRun(eq(5L), any(), any(), anyBoolean())).thenThrow(new OrchestratorApiException("недоступен"));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isBadGateway())
@@ -166,7 +190,7 @@ class RunControllerTest {
 
     @Test
     void runReturnsBadGatewayOnOrchestratorAuthError() throws Exception {
-        when(executionService.startRun(eq(5L), any(), any())).thenThrow(new OrchestratorAuthException("неверные учётные данные"));
+        when(executionService.startRun(eq(5L), any(), any(), anyBoolean())).thenThrow(new OrchestratorAuthException("неверные учётные данные"));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run"))
                 .andExpect(status().isBadGateway())

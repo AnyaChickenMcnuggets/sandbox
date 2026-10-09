@@ -31,6 +31,11 @@ public final class RunReportHtmlRenderer {
             .badge{display:inline-block;padding:1px 9px;border-radius:10px;color:#fff;font-size:12px;font-weight:600;vertical-align:middle}
             .cause{border-left:4px solid #e03131;background:#fff5f5;padding:10px 14px;white-space:pre-wrap;word-break:break-word}
             code{background:#f0f4f8;padding:1px 5px;border-radius:3px}
+            tr:target td{background:#fff8c5}.graph{border:1px solid #d9e2ec;border-radius:8px;padding:8px;margin:6px 0 12px}
+            .legend{margin:0 0 6px}.legend span{margin-right:16px;font-size:12px;color:#52606d}
+            .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+            details{margin-top:4px}summary{cursor:pointer;color:#52606d;font-size:12px}
+            .tech{margin-top:4px;padding:6px 8px;background:#f0f4f8;border-radius:4px;font:12px/1.4 Consolas,monospace;white-space:pre-wrap;word-break:break-word}
             @media print{main{padding:0}.card,tr,svg{break-inside:avoid}h2{break-after:avoid}}
             """;
 
@@ -45,10 +50,17 @@ public final class RunReportHtmlRenderer {
                 .append("<title>").append(esc(title)).append("</title><style>").append(CSS).append("</style></head><body><main>\n");
 
         header(html, report);
-        html.append("<h2>Последовательность шагов</h2>\n")
-                .append("<p class=\"muted\">Столбцы - порядок выполнения, ширина потока и высота блока - время. ")
-                .append("Серый блок - шаг не выполнялся.</p>\n")
-                .append(SankeyDiagram.render(report.steps(), report.edges())).append('\n');
+        html.append("<h2>Ход выполнения</h2>\n")
+                .append("<p class=\"muted\">Выполнение идёт сверху вниз. Каждый блок - один шаг; число внутри блока - номер шага ")
+                .append("в таблице «Шаги» ниже, по нажатию на блок открывается его строка. Параллельные ветки - отдельные ")
+                .append("цветные линии: где линия делится, начинаются параллельные ветки, где сходится - шаг дожидается всех веток. ")
+                .append("Форма блока - тип шага, цвет - результат, размер - длительность относительно самого быстрого и самого долгого шага этого прогона (самый долгий - самый большой блок).")
+                .append("Названия шагов видны в таблице и во всплывающей подсказке.</p>\n")
+                .append(StepGraphDiagram.legend()).append(legend())
+                .append("<div class=\"graph\">").append(StepGraphDiagram.render(report.steps(), report.edges())).append("</div>\n")
+                .append("<h2>Хронология</h2>\n")
+                .append("<p class=\"muted\">Когда каждый шаг начался и сколько длился, по общей шкале времени прогона.</p>\n")
+                .append(GanttDiagram.render(report)).append('\n');
         failureCause(html, report);
         stepsTable(html, report);
         queueChecks(html, report);
@@ -80,9 +92,9 @@ public final class RunReportHtmlRenderer {
         ReportText.firstFailed(report).ifPresent(step -> {
             html.append("<h2>Причина ошибки</h2>\n<p>Первым завершился с ошибкой шаг <b>«")
                     .append(esc(step.name())).append("»</b> (").append(esc(ReportText.stepTypeLabel(step.type())))
-                    .append("). Последующие ошибки могут быть его следствием.</p>\n<div class=\"cause\">")
-                    .append(esc(step.errorMessage() == null ? "Текст ошибки не сохранён" : step.errorMessage()))
-                    .append("</div>\n");
+                    .append("). Последующие ошибки могут быть его следствием.</p>\n<div class=\"cause\">");
+            StepComment.Comment comment = StepComment.describe(report, step);
+            html.append(esc(comment.text())).append(technicalDetails(comment)).append("</div>\n");
         });
     }
 
@@ -91,13 +103,13 @@ public final class RunReportHtmlRenderer {
                 .append("<th>Длительность</th><th>Комментарий</th></tr>\n");
         int index = 1;
         for (RunReportSnapshot.Step step : report.steps()) {
-            String comment = step.errorMessage() != null ? step.errorMessage() : step.detail();
-            html.append("<tr><td class=\"num\">").append(index++).append("</td><td>").append(esc(step.name()))
+            StepComment.Comment comment = StepComment.describe(report, step);
+            html.append("<tr id=\"step-").append(index).append("\"><td class=\"num\">").append(index++).append("</td><td>").append(esc(step.name()))
                     .append("</td><td>").append(esc(ReportText.stepTypeLabel(step.type())))
                     .append("</td><td>").append(statusBadge(step.status()))
                     .append("</td><td class=\"num\">").append(esc(ReportText.dateTime(step.startedAt())))
                     .append("</td><td class=\"num\">").append(esc(ReportText.duration(step.durationSeconds())))
-                    .append("</td><td>").append(esc(nullToDash(comment))).append("</td></tr>\n");
+                    .append("</td><td>").append(esc(comment.text())).append(technicalDetails(comment)).append("</td></tr>\n");
         }
         html.append("</table>\n");
     }
@@ -112,10 +124,9 @@ public final class RunReportHtmlRenderer {
             Map<String, Object> result = step.result();
             html.append("<div class=\"card\"><h3>").append(esc(step.name())).append(' ');
             if (result == null) {
+                StepComment.Comment comment = StepComment.describe(report, step);
                 html.append("<span class=\"badge neutral\">Нет данных</span></h3>\n<p class=\"muted\">")
-                        .append(esc(step.status() == RunStatus.PENDING
-                                ? "Шаг не выполнялся." : "Данные проверки не сохранены: " + nullToDash(step.errorMessage())))
-                        .append("</p></div>\n");
+                        .append(esc(comment.text())).append(technicalDetails(comment)).append("</p></div>\n");
                 continue;
             }
             boolean passed = Boolean.TRUE.equals(result.get("passed"));
@@ -215,6 +226,20 @@ public final class RunReportHtmlRenderer {
         html.append("</table>\n");
     }
 
+    private static String legend() {
+        StringBuilder legend = new StringBuilder("<p class=\"legend\">");
+        for (RunStatus status : List.of(RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.STOPPED, RunStatus.RUNNING, RunStatus.PENDING)) {
+            legend.append("<span><i style=\"background:").append(ReportText.statusColor(status)).append("\"></i>")
+                    .append(esc(ReportText.statusLabel(status))).append("</span>");
+        }
+        return legend.append("</p>\n").toString();
+    }
+
+    private static String technicalDetails(StepComment.Comment comment) {
+        return comment.technical() == null || comment.technical().isBlank() ? ""
+                : "<details><summary>Технические детали</summary><div class=\"tech\">" + esc(comment.technical()) + "</div></details>";
+    }
+
     private static List<RunReportSnapshot.Step> stepsOfType(RunReportSnapshot report, ScenarioStepType type) {
         return report.steps().stream().filter(s -> s.type() == type).toList();
     }
@@ -267,6 +292,6 @@ public final class RunReportHtmlRenderer {
     }
 
     private static String esc(String value) {
-        return value == null ? "" : HtmlUtils.htmlEscape(value);
+        return value == null ? "" : HtmlUtils.htmlEscape(value, "UTF-8");
     }
 }

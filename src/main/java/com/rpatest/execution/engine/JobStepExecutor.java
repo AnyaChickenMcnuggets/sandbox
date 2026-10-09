@@ -93,10 +93,11 @@ public class JobStepExecutor implements StepExecutor {
                     statusPoller.pollUntilTerminal(stepRun, created.id(), assignmentName, timeout, pollInterval);
             log.info("Step '{}': Assignment id={} finished, success={}, robot='{}'",
                     step.getName(), created.id(), launch.isSuccess(), launch.robotName());
-            stepRun.setResult(describeResult(assignmentName, projectLabel, launch));
+            String robotError = launch.isSuccess() ? ""
+                    : OrchestratorNarration.describeQueueError(orchestratorLookup.findQueueEntries(created.id()));
+            stepRun.setResult(describeResult(assignmentName, projectLabel, launch, robotError));
             if (!launch.isSuccess()) {
-                throw new StepExecutionException("Assignment failed on robot '" + launch.robotName()
-                        + "'" + OrchestratorNarration.describeQueueError(orchestratorLookup.findQueueEntries(created.id())));
+                throw new StepExecutionException("Assignment failed on robot '" + launch.robotName() + "'" + robotError);
             }
         } catch (OrchestratorApiException e) {
             log.error("Step '{}': orchestrator call failed", step.getName(), e);
@@ -104,7 +105,9 @@ public class JobStepExecutor implements StepExecutor {
         }
     }
 
-    private Map<String, Object> describeResult(String assignmentName, String projectLabel, RpaProjectLaunchDto launch) {
+    /** @param robotError {@code ": text"} from the project queue (see {@code describeQueueError}) or empty */
+    private Map<String, Object> describeResult(
+            String assignmentName, String projectLabel, RpaProjectLaunchDto launch, String robotError) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("assignmentName", assignmentName);
         result.put("projectName", projectLabel);
@@ -112,6 +115,7 @@ public class JobStepExecutor implements StepExecutor {
         result.put("robotStartedAt", launch.robotStartedAt() == null ? null : launch.robotStartedAt().toString());
         result.put("completedAt", launch.completedAt() == null ? null : launch.completedAt().toString());
         result.put("success", launch.isSuccess());
+        result.put("robotError", robotError.isEmpty() ? null : robotError.replaceFirst("^:\\s*", ""));
         return result;
     }
 

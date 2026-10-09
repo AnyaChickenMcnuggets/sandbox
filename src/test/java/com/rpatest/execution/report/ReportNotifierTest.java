@@ -62,14 +62,15 @@ class ReportNotifierTest {
     void mailBodyHasTheErrorAndTheLinkWhenConfigured() {
         properties.getNotification().setPublicBaseUrl("https://host:8443/");
         RunReportSnapshot failed = ReportFixtures.report(RunStatus.FAILED, "S<b>", List.of(
-                ReportFixtures.step(1, "Задание", ScenarioStepType.JOB, RunStatus.FAILED, 3L, "robot said <no>", null)), List.of());
+                ReportFixtures.step(1, "Задание", ScenarioStepType.JOB, RunStatus.FAILED, 3L, "Assignment failed on robot 'r1': <no>",
+                        Map.of("robotName", "r1", "success", false, "robotError", "<no>"))), List.of());
 
         notifier.notifyFinished(failed);
 
         ArgumentCaptor<EnqueueExchangeQueueDto> item = ArgumentCaptor.forClass(EnqueueExchangeQueueDto.class);
         verify(port).enqueue(eq("SND"), item.capture());
         String body = item.getValue().metadata().get("Mail_Body");
-        assertThat(body).contains("ЕСТЬ ОШИБКИ").contains("Ошибка в шаге «Задание»").contains("robot said &lt;no&gt;")
+        assertThat(body).contains("ЕСТЬ ОШИБКИ").contains("Ошибка в шаге «Задание»").contains("Задание завершилось с ошибкой на роботе «r1»").contains("Сообщение робота: &lt;no&gt;")
                 .contains("S&lt;b&gt;").contains("href=\"https://host:8443/api/v1/runs/12/report\"")
                 .doesNotContain("<no>").doesNotContain("S<b>");
     }

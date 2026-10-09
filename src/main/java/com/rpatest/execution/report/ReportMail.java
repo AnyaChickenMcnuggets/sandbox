@@ -43,7 +43,7 @@ final class ReportMail {
                 .append("<b>Длительность:</b> ").append(esc(ReportText.duration(report.durationSeconds()))).append("<br>")
                 .append("<b>Шаги:</b> ").append(esc(ReportText.stepsSummary(report))).append("</p>");
         ReportText.firstFailed(report).ifPresent(step -> body.append("<p><b>Ошибка в шаге «")
-                .append(esc(step.name())).append("»:</b> ").append(esc(shorten(step.errorMessage()))).append("</p>"));
+                .append(esc(step.name())).append("»:</b> ").append(esc(shorten(StepComment.describe(report, step).text()))).append("</p>"));
         if (publicBaseUrl != null && !publicBaseUrl.isBlank()) {
             String link = publicBaseUrl.replaceAll("/+$", "") + "/api/v1/runs/" + report.runId() + "/report";
             body.append("<p><a href=\"").append(esc(link)).append("\">Открыть полный отчет</a> ")
@@ -77,6 +77,6 @@ final class ReportMail {
     }
 
     private static String esc(String text) {
-        return text == null ? "" : HtmlUtils.htmlEscape(text);
+        return text == null ? "" : HtmlUtils.htmlEscape(text, "UTF-8");
     }
 }

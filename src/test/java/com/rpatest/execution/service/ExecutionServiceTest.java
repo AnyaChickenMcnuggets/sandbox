@@ -327,7 +327,41 @@ class ExecutionServiceTest {
 
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(engine, completionHandler);
         order.verify(engine).runScenario(100L, null);
-        order.verify(completionHandler).onRunFinished(100L);
+        order.verify(completionHandler).onRunFinished(100L, false);
+    }
+
+    @Test
+    void startRunPassesTheMailFlagToTheCompletionHandler() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(runRepository.save(any())).thenReturn(run(100L, 1L));
+        when(completionHandler.isMailAvailable()).thenReturn(true);
+
+        service.startRun(1L, "tester", null, true);
+
+        verify(completionHandler).onRunFinished(100L, true);
+    }
+
+    @Test
+    void startRunRefusesToPromiseAMailWhenTheServerCannotSendOne() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(completionHandler.isMailAvailable()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.startRun(1L, "tester", null, true))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("report.notification.enabled");
+
+        verify(runRepository, never()).save(any());
+        verify(engine, never()).runScenario(any(), any());
+    }
+
+    @Test
+    void startRunWithoutTheMailFlagNeverAsksWhetherMailIsAvailable() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(runRepository.save(any())).thenReturn(run(100L, 1L));
+
+        service.startRun(1L, "tester", null, false);
+
+        verify(completionHandler, never()).isMailAvailable();
     }
 
     @Test
@@ -338,7 +372,7 @@ class ExecutionServiceTest {
 
         assertThatThrownBy(() -> service.startRun(1L, "tester")).isInstanceOf(IllegalStateException.class);
 
-        verify(completionHandler).onRunFinished(100L);
+        verify(completionHandler).onRunFinished(100L, false);
     }
 
     @Test

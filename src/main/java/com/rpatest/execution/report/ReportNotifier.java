@@ -25,6 +25,10 @@ public class ReportNotifier {
         this.properties = properties;
     }
 
+    public boolean isAvailable() {
+        return properties.getNotification().isEnabled();
+    }
+
     public void notifyFinished(RunReportSnapshot report) {
         ReportProperties.Notification config = properties.getNotification();
         if (!config.isEnabled()) {

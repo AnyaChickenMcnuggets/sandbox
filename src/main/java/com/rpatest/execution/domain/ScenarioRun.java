@@ -45,6 +45,10 @@ public class ScenarioRun {
     @Column(name = "start_step_id")
     private Long startStepId;
 
+    /** Отправить ли письмо запустившему, когда прогон закончится (выбирается при запуске). */
+    @Column(name = "notify_by_email", nullable = false)
+    private boolean notifyByEmail;
+
     protected ScenarioRun() {
     }
 
@@ -57,6 +61,12 @@ public class ScenarioRun {
     }
 
     public ScenarioRun(Long scenarioId, String triggeredBy, Long startStepId, String scenarioName) {
+        this(scenarioId, triggeredBy, startStepId, scenarioName, false);
+    }
+
+    public ScenarioRun(
+            Long scenarioId, String triggeredBy, Long startStepId, String scenarioName, boolean notifyByEmail) {
+        this.notifyByEmail = notifyByEmail;
         this.scenarioId = scenarioId;
         this.triggeredBy = triggeredBy;
         this.startStepId = startStepId;
@@ -104,5 +114,9 @@ public class ScenarioRun {
 
     public Long getStartStepId() {
         return startStepId;
+    }
+
+    public boolean isNotifyByEmail() {
+        return notifyByEmail;
     }
 }

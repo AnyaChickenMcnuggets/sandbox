@@ -3,7 +3,6 @@ package com.rpatest.execution.report;
 import static com.rpatest.execution.report.ReportFixtures.report;
 import static com.rpatest.execution.report.ReportFixtures.step;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.scenario.domain.ScenarioStepType;
@@ -22,7 +21,7 @@ class RunReportHtmlRendererTest {
         assertThat(html).contains("Отчёт о тестировании").contains("УСПЕШНО").contains("Сверка платежей")
                 .contains("№12").contains("ivanov").contains("6 мин 23 с")
                 .contains("07.10.2026 20:40:00").contains("07.10.2026 20:46:23");
-        assertThat(html).contains("Последовательность шагов").contains("<svg").contains("Проверки очередей")
+        assertThat(html).contains("Ход выполнения").contains("Хронология").contains("<svg").contains("Проверки очередей")
                 .contains("Задания").contains("Очереди");
         assertThat(html).contains("robot-7").contains("Obrabotka_12_2").contains("07.10.2026 20:41:10");
         assertThat(html).contains("Пройдена").contains("&#10003; выполнено").contains("out_q");
@@ -39,7 +38,9 @@ class RunReportHtmlRendererTest {
         String html = RunReportHtmlRenderer.render(failed);
 
         assertThat(html).contains("ЕСТЬ ОШИБКИ").contains("Причина ошибки").contains("Assignment failed on robot &#39;r1&#39;");
-        assertThat(html).contains("Нет данных").contains("Шаг не выполнялся");
+        assertThat(html).contains("Нет данных").contains("Не выполнялся: один из предыдущих шагов завершился с ошибкой.");
+        assertThat(html).contains("Шаг завершился с ошибкой. Подробности - в технических деталях.")
+                .contains("Технические детали");
         int cause = html.indexOf("Причина ошибки");
         assertThat(html.substring(cause, html.indexOf("</div>", cause))).contains("r1").doesNotContain("later fallout");
     }
@@ -76,49 +77,21 @@ class RunReportHtmlRendererTest {
     }
 
     @Test
-    void sankeyDrawsOneNodePerStepAndOneBandPerEdge() {
+    void rendersTheStructureMapTheTimelineAndALegend() {
         String html = RunReportHtmlRenderer.render(ReportFixtures.succeededChain());
 
-        assertThat(count(html, "<rect ")).isEqualTo(3);
-        assertThat(count(html, "<path ")).isEqualTo(2);
-        assertThat(html).contains("Входная очередь").contains("Обработка");
-    }
-
-    @Test
-    void sankeyHandlesFanOutFanInAndUnconnectedSteps() {
-        List<RunReportSnapshot.Step> steps = List.of(
-                step(1, "root", ScenarioStepType.QUEUE, RunStatus.SUCCEEDED, 5L, null, null),
-                step(2, "left", ScenarioStepType.JOB, RunStatus.SUCCEEDED, 50L, null, null),
-                step(3, "right", ScenarioStepType.JOB, RunStatus.SUCCEEDED, 10L, null, null),
-                step(4, "join", ScenarioStepType.QUEUE_CHECK, RunStatus.FAILED, 2L, "x", null),
-                step(5, "lonely", ScenarioStepType.QUEUE, RunStatus.PENDING, null, null, null));
-        List<RunReportSnapshot.Edge> edges = List.of(new RunReportSnapshot.Edge(1L, 2L), new RunReportSnapshot.Edge(1L, 3L),
-                new RunReportSnapshot.Edge(2L, 4L), new RunReportSnapshot.Edge(3L, 4L));
-
-        String svg = SankeyDiagram.render(steps, edges);
-
-        assertThat(count(svg, "<rect ")).isEqualTo(5);
-        assertThat(count(svg, "<path ")).isEqualTo(4);
-        assertThat(svg).contains(SankeyDiagram.color(RunStatus.FAILED)).contains(SankeyDiagram.color(RunStatus.PENDING));
-    }
-
-    @Test
-    void sankeyIgnoresEdgesToUnknownStepsAndSurvivesACycle() {
-        List<RunReportSnapshot.Step> steps = List.of(
-                step(1, "a", ScenarioStepType.QUEUE, RunStatus.SUCCEEDED, 5L, null, null),
-                step(2, "b", ScenarioStepType.JOB, RunStatus.SUCCEEDED, 5L, null, null));
-        List<RunReportSnapshot.Edge> edges = List.of(new RunReportSnapshot.Edge(1L, 2L), new RunReportSnapshot.Edge(2L, 1L),
-                new RunReportSnapshot.Edge(1L, 99L));
-
-        assertThatCode(() -> SankeyDiagram.render(steps, edges)).doesNotThrowAnyException();
-        assertThat(count(SankeyDiagram.render(steps, List.of(new RunReportSnapshot.Edge(1L, 99L))), "<path ")).isZero();
+        assertThat(html).contains("Ход выполнения").contains("Хронология").contains("class=\"legend\"")
+                .contains("Создание очереди").contains("Проверка очереди").contains("Задание")
+                .contains("сверху вниз").contains("размер - длительность");
+        assertThat(count(html, "role=\"img\"")).isEqualTo(2);
+        assertThat(html).contains("<title>2. Обработка - Успешно");
     }
 
     @Test
     void emptyRunRendersWithoutDiagramInsteadOfFailing() {
         String html = RunReportHtmlRenderer.render(report(RunStatus.SUCCEEDED, "S", List.of(), List.of()));
 
-        assertThat(html).contains("В прогоне нет шагов").doesNotContain("<svg");
+        assertThat(html).contains("В прогоне нет шагов").doesNotContain("role=\"img\"");
     }
 
     private static int count(String text, String part) {

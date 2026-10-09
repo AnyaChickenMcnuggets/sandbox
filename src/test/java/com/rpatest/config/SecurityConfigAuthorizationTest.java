@@ -1,6 +1,7 @@
 package com.rpatest.config;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -64,7 +65,8 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @WebMvcTest(controllers = {RunController.class, ScenarioController.class, AdminUserController.class,
         AuthController.class, RolePermissionController.class, CleanupController.class, OrchestratorController.class,
-        com.rpatest.execution.web.RunReportController.class})
+        com.rpatest.execution.web.RunReportController.class,
+        com.rpatest.execution.web.ReportSettingsController.class})
 @Import({SecurityConfig.class, PermissionAuthorization.class})
 class SecurityConfigAuthorizationTest {
 
@@ -88,6 +90,9 @@ class SecurityConfigAuthorizationTest {
 
     @MockBean
     private com.rpatest.execution.report.RunReportService runReportService;
+
+    @MockBean
+    private com.rpatest.execution.report.ReportNotifier reportNotifier;
 
     @MockBean
     private CleanupService cleanupService;
@@ -181,7 +186,7 @@ class SecurityConfigAuthorizationTest {
     @WithMockUser(roles = "OPERATOR")
     void operatorCanStartRunStopRunAndCleanup() throws Exception {
         RunResponse run = new RunResponse(1L, 5L, "s", "alice", RunStatus.PENDING, null, null, null, List.of());
-        when(executionService.startRun(eq(5L), any(), any())).thenReturn(run);
+        when(executionService.startRun(eq(5L), any(), any(), anyBoolean())).thenReturn(run);
         when(executionService.stopRun(1L)).thenReturn(run);
         when(cleanupService.cleanupLastRun(5L)).thenReturn(List.of());
 
@@ -223,6 +228,19 @@ class SecurityConfigAuthorizationTest {
 
         when(rolePermissionService.permissionsOf(Role.VIEWER)).thenReturn(Set.of(Permission.SCENARIO_READ));
         mockMvc.perform(get("/api/v1/runs/1/report")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void reportSettingsAreOpenToAnyAuthenticatedRole() throws Exception {
+        when(reportNotifier.isAvailable()).thenReturn(true);
+
+        mockMvc.perform(get("/api/v1/report/settings")).andExpect(status().isOk());
+    }
+
+    @Test
+    void reportSettingsRequireAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/report/settings")).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -272,7 +290,7 @@ class SecurityConfigAuthorizationTest {
         EnumSet<Permission> widened = EnumSet.copyOf(VIEWER_DEFAULT);
         widened.add(Permission.RUN_START);
         when(rolePermissionService.permissionsOf(Role.VIEWER)).thenReturn(widened);
-        when(executionService.startRun(eq(5L), any(), any())).thenReturn(
+        when(executionService.startRun(eq(5L), any(), any(), anyBoolean())).thenReturn(
                 new RunResponse(1L, 5L, "s", "alice", RunStatus.PENDING, null, null, null, List.of()));
 
         mockMvc.perform(post("/api/v1/scenarios/5/run")).andExpect(status().isAccepted());

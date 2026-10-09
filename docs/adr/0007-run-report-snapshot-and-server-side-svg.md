@@ -1,6 +1,6 @@
 # 0007. Run report: a snapshot built at completion, rendered as server-side HTML + SVG
 
-Status: Accepted
+Status: Accepted (the Sankey diagram of decision 3 is replaced by ADR 0008; server-side SVG without scripts still stands)
 Date: 2026-10-08
 
 ## Context

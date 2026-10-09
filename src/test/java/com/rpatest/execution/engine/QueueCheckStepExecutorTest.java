@@ -426,7 +426,8 @@ class QueueCheckStepExecutorTest {
 
         assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
 
-        assertThat(stepRun.getResult()).containsEntry("passed", false).containsEntry("actualTotal", 1);
+        assertThat(stepRun.getResult()).containsEntry("passed", false).containsEntry("actualTotal", 1)
+                .containsEntry("failureReason", "ALL_FINAL");
     }
 
     private ExchangeQueueValueDto item(String naturalKey, ExchangeQueueValueEventType eventType) {

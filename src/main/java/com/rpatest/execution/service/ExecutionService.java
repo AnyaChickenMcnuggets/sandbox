@@ -106,8 +106,22 @@ public class ExecutionService {
      */
     @Transactional
     public RunResponse startRun(Long scenarioId, String triggeredBy, Long startStepId) {
+        return startRun(scenarioId, triggeredBy, startStepId, false);
+    }
+
+    /**
+     * @param sendReportByMail отправить тому, кто запустил, письмо о завершении прогона (см.
+     *                         {@code ReportNotifier}). Если на сервере отправка не включена - сразу
+     *                         400, до создания прогона: молча не отправить письмо хуже, чем отказать.
+     */
+    @Transactional
+    public RunResponse startRun(Long scenarioId, String triggeredBy, Long startStepId, boolean sendReportByMail) {
         TestScenario scenario = scenarioRepository.findById(scenarioId)
                 .orElseThrow(() -> new NotFoundException("Сценарий не найден: " + scenarioId));
+        if (sendReportByMail && !completionHandler.isMailAvailable()) {
+            throw new InvalidRequestException(
+                    "Отправка отчёта на почту не включена на сервере (report.notification.enabled)");
+        }
         requireEnoughFreeRobots();
         if (startStepId != null) {
             ScenarioStep startStep = scenarioStepRepository.findById(startStepId)
@@ -125,7 +139,7 @@ public class ExecutionService {
             try {
                 engine.runScenario(runId, startStepId);
             } finally {
-                completionHandler.onRunFinished(runId);
+                completionHandler.onRunFinished(runId, sendReportByMail);
             }
         });
         return toResponse(run, List.of());
