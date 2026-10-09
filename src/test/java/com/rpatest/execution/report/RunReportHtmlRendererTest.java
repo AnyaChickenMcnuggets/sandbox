@@ -33,14 +33,14 @@ class RunReportHtmlRendererTest {
         RunReportSnapshot failed = report(RunStatus.FAILED, "S", List.of(
                 step(1, "Задание А", ScenarioStepType.JOB, RunStatus.FAILED, 10L, "Assignment failed on robot 'r1'", null),
                 step(2, "Задание Б", ScenarioStepType.JOB, RunStatus.FAILED, 10L, "later fallout", null),
-                step(3, "Проверка", ScenarioStepType.QUEUE_CHECK, RunStatus.PENDING, null, null, null)), List.of());
+                step(3, "Проверка", ScenarioStepType.QUEUE_CHECK, RunStatus.PENDING, null, null, null)),
+                List.of(new RunReportSnapshot.Edge(1L, 3L)));
 
         String html = RunReportHtmlRenderer.render(failed);
 
-        assertThat(html).contains("ЕСТЬ ОШИБКИ").contains("Причина ошибки").contains("Assignment failed on robot &#39;r1&#39;");
-        assertThat(html).contains("Нет данных").contains("Не выполнялся: один из предыдущих шагов завершился с ошибкой.");
-        assertThat(html).contains("Шаг завершился с ошибкой. Подробности - в технических деталях.")
-                .contains("Технические детали");
+        assertThat(html).contains("ЕСТЬ ОШИБКИ").contains("Причина ошибки").contains("Задание завершилось с ошибкой на роботе «r1»");
+        assertThat(html).contains("Технические детали").contains("Assignment failed on robot &#39;r1&#39;");
+        assertThat(html).contains("Нет данных").contains("Не выполнялся: шаг «Задание А» (№1), от которого он зависит, завершился с ошибкой.");
         int cause = html.indexOf("Причина ошибки");
         assertThat(html.substring(cause, html.indexOf("</div>", cause))).contains("r1").doesNotContain("later fallout");
     }

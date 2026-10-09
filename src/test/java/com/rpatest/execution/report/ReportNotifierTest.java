@@ -70,7 +70,7 @@ class ReportNotifierTest {
         ArgumentCaptor<EnqueueExchangeQueueDto> item = ArgumentCaptor.forClass(EnqueueExchangeQueueDto.class);
         verify(port).enqueue(eq("SND"), item.capture());
         String body = item.getValue().metadata().get("Mail_Body");
-        assertThat(body).contains("ЕСТЬ ОШИБКИ").contains("Ошибка в шаге «Задание»").contains("Задание завершилось с ошибкой на роботе «r1»").contains("Сообщение робота: &lt;no&gt;")
+        assertThat(body).contains("ЕСТЬ ОШИБКИ").contains("Ошибка в шаге «Задание»").contains("Задание завершилось с ошибкой на роботе «r1»").contains("&lt;no&gt;")
                 .contains("S&lt;b&gt;").contains("href=\"https://host:8443/api/v1/runs/12/report\"")
                 .doesNotContain("<no>").doesNotContain("S<b>");
     }
