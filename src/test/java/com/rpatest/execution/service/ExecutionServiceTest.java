@@ -19,6 +19,7 @@ import com.rpatest.execution.domain.RunStatus;
 import com.rpatest.execution.domain.ScenarioRun;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.engine.ScenarioExecutionEngine;
+import com.rpatest.execution.report.RunCompletionHandler;
 import com.rpatest.execution.repository.ScenarioRunRepository;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.execution.web.RobotAvailabilityResponse;
@@ -57,6 +58,7 @@ class ExecutionServiceTest {
     private ScenarioExecutionEngine engine;
     private AssignmentsPort assignmentsPort;
     private RobotsPort robotsPort;
+    private RunCompletionHandler completionHandler;
     private ExecutionService service;
 
     @BeforeEach
@@ -68,12 +70,13 @@ class ExecutionServiceTest {
         engine = mock(ScenarioExecutionEngine.class);
         assignmentsPort = mock(AssignmentsPort.class);
         robotsPort = mock(RobotsPort.class);
+        completionHandler = mock(RunCompletionHandler.class);
         // По умолчанию роботов достаточно (2 из 2 свободны) — тесты, которые не про блокировку
         // запуска, не должны заботиться об этом сами.
         when(robotsPort.list()).thenReturn(List.of(robot(1, RobotRunStatus.IDLE), robot(2, RobotRunStatus.IDLE)));
         Executor synchronousExecutor = Runnable::run;
         service = new ExecutionService(scenarioRepository, runRepository, stepRunRepository, scenarioStepRepository,
-                engine, assignmentsPort, robotsPort, new OrchestratorProperties(), synchronousExecutor);
+                engine, assignmentsPort, robotsPort, new OrchestratorProperties(), completionHandler, synchronousExecutor);
     }
 
     @Test
@@ -106,7 +109,7 @@ class ExecutionServiceTest {
         OrchestratorProperties properties = new OrchestratorProperties();
         properties.setMinFreeRobots(1);
         service = new ExecutionService(scenarioRepository, runRepository, stepRunRepository, scenarioStepRepository,
-                engine, assignmentsPort, robotsPort, properties, Runnable::run);
+                engine, assignmentsPort, robotsPort, properties, completionHandler, Runnable::run);
         when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
         when(robotsPort.list()).thenReturn(List.of(robot(1, RobotRunStatus.IDLE)));
         when(runRepository.save(any())).thenReturn(run(100L, 1L));
@@ -313,6 +316,29 @@ class ExecutionServiceTest {
 
         assertThat(response.status()).isEqualTo(RunStatus.SUCCEEDED);
         verify(assignmentsPort, never()).stop(anyInt());
+    }
+
+    @Test
+    void startRunHandsFinishedRunToCompletionHandlerAfterTheEngine() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(runRepository.save(any())).thenReturn(run(100L, 1L));
+
+        service.startRun(1L, "tester");
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(engine, completionHandler);
+        order.verify(engine).runScenario(100L, null);
+        order.verify(completionHandler).onRunFinished(100L);
+    }
+
+    @Test
+    void startRunStillBuildsTheReportWhenTheEngineThrows() {
+        when(scenarioRepository.findById(1L)).thenReturn(Optional.of(scenario("My Scenario")));
+        when(runRepository.save(any())).thenReturn(run(100L, 1L));
+        org.mockito.Mockito.doThrow(new IllegalStateException("engine down")).when(engine).runScenario(100L, null);
+
+        assertThatThrownBy(() -> service.startRun(1L, "tester")).isInstanceOf(IllegalStateException.class);
+
+        verify(completionHandler).onRunFinished(100L);
     }
 
     @Test

@@ -11,7 +11,9 @@ import com.rpatest.orchestrator.exception.OrchestratorApiException;
 import com.rpatest.orchestrator.util.OrchestratorNames;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -72,6 +74,11 @@ public class QueueStepExecutor implements StepExecutor {
                 progressReporter.report(stepRun, "Transactions added: " + added + "/" + transactions.size()
                         + " (last naturalKey='" + transaction.naturalKey() + "')");
             }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("queueName", queueName);
+            result.put("created", provisioned.created());
+            result.put("transactionsAdded", added);
+            stepRun.setResult(result);
             progressReporter.report(stepRun, "Queue '" + queueName + "' is ready, transactions added: " + added);
         } catch (OrchestratorApiException e) {
             log.error("Step '{}': orchestrator call failed while working with queue '{}'", step.getName(), queueName, e);

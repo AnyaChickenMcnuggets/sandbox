@@ -16,6 +16,7 @@ import com.rpatest.orchestrator.util.OrchestratorNarration;
 import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -92,6 +93,7 @@ public class JobStepExecutor implements StepExecutor {
                     statusPoller.pollUntilTerminal(stepRun, created.id(), assignmentName, timeout, pollInterval);
             log.info("Step '{}': Assignment id={} finished, success={}, robot='{}'",
                     step.getName(), created.id(), launch.isSuccess(), launch.robotName());
+            stepRun.setResult(describeResult(assignmentName, projectLabel, launch));
             if (!launch.isSuccess()) {
                 throw new StepExecutionException("Assignment failed on robot '" + launch.robotName()
                         + "'" + OrchestratorNarration.describeQueueError(orchestratorLookup.findQueueEntries(created.id())));
@@ -100,6 +102,17 @@ public class JobStepExecutor implements StepExecutor {
             log.error("Step '{}': orchestrator call failed", step.getName(), e);
             throw new StepExecutionException("Failed to execute job step '" + step.getName() + "'", e);
         }
+    }
+
+    private Map<String, Object> describeResult(String assignmentName, String projectLabel, RpaProjectLaunchDto launch) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("assignmentName", assignmentName);
+        result.put("projectName", projectLabel);
+        result.put("robotName", launch.robotName());
+        result.put("robotStartedAt", launch.robotStartedAt() == null ? null : launch.robotStartedAt().toString());
+        result.put("completedAt", launch.completedAt() == null ? null : launch.completedAt().toString());
+        result.put("success", launch.isSuccess());
+        return result;
     }
 
     private void validateProjectConfig(JobStepConfig config, ScenarioStep step) {

@@ -388,6 +388,47 @@ class QueueCheckStepExecutorTest {
         assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void recordsPassedResultWithExpectedActualAndTransactions() {
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200)).thenReturn(ListResultDto.<ExchangeQueueValueDto>of(2, List.of(
+                item("k1", ExchangeQueueValueEventType.SUCCESS),
+                item("k2", ExchangeQueueValueEventType.ERROR))));
+        ScenarioStep step = step(Map.of("queueName", "q", "expectedStatusCounts", Map.of("SUCCESS", 1, "ERROR", 1)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        executor.execute(stepRun, step);
+
+        assertThat(stepRun.getResult())
+                .containsEntry("queueName", "q")
+                .containsEntry("passed", true)
+                .containsEntry("actualTotal", 2)
+                .containsEntry("transactionsTotal", 2);
+        assertThat((Map<String, Object>) stepRun.getResult().get("expected")).containsEntry("SUCCESS", 1);
+        assertThat((Map<String, Object>) stepRun.getResult().get("actual")).containsEntry("SUCCESS", 1L).containsEntry("ERROR", 1L);
+        assertThat((List<Map<String, Object>>) stepRun.getResult().get("transactions"))
+                .extracting(t -> t.get("naturalKey"), t -> t.get("status"))
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("k1", "SUCCESS"), org.assertj.core.groups.Tuple.tuple("k2", "ERROR"));
+    }
+
+    @Test
+    void recordsFailedResultWhenTheCheckGivesUp() {
+        // the failing snapshot is the one the report must show - the step throws right after it
+        UUID queueId = UUID.randomUUID();
+        when(exchangeQueuesPort.findByName("q")).thenReturn(Optional.of(new ExchangeQueueDto(queueId, "q", null, 0, 0, null)));
+        when(exchangeQueuesPort.listItems(queueId, 0, 200, "k1", false)).thenReturn(
+                ListResultDto.<ExchangeQueueValueDto>of(1, List.of(item("k1", ExchangeQueueValueEventType.SUCCESS))));
+        ScenarioStep step = step(Map.of(
+                "queueName", "q", "naturalKeys", List.of("k1"), "expectedStatusCounts", Map.of("SUCCESS", 5)));
+        StepRun stepRun = new StepRun(1L, 2L);
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
+
+        assertThat(stepRun.getResult()).containsEntry("passed", false).containsEntry("actualTotal", 1);
+    }
+
     private ExchangeQueueValueDto item(String naturalKey, ExchangeQueueValueEventType eventType) {
         return new ExchangeQueueValueDto(UUID.randomUUID(), "v", naturalKey, null, null, null, eventType, null, null);
     }

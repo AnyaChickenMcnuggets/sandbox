@@ -14,7 +14,9 @@ import com.rpatest.scenario.domain.ScenarioStep;
 import com.rpatest.scenario.domain.ScenarioStepType;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,6 +37,9 @@ import org.springframework.stereotype.Component;
 public class QueueCheckStepExecutor implements StepExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(QueueCheckStepExecutor.class);
+
+    /** Cap for the transaction list stored in the step result (and shown in the run report). */
+    static final int MAX_REPORTED_TRANSACTIONS = 200;
 
     private final QueueItemFinder queueItemFinder;
     private final ExchangeQueueProvisioner queueProvisioner;
@@ -137,10 +142,15 @@ public class QueueCheckStepExecutor implements StepExecutor {
 
             String actualDescription = OrchestratorNarration.describeActual(actualCounts, actualTotal);
             log.debug("Queue check attempt #{} for queue '{}': {}", attempt, queueName, actualDescription);
+            boolean satisfied = satisfies(expected, minTotalCount, actualCounts, actualTotal);
+            // Before report(): it saves the step run, and the last snapshot of the check (also the
+            // failing one - the step throws below) is what the run report shows.
+            stepRun.setResult(describeResult(queueName, expected, minTotalCount, actualCounts, matching, maxRetray,
+                    satisfied));
             progressReporter.report(stepRun, "Checking queue '" + queueName + "' (attempt #" + attempt + "): "
                     + actualDescription);
 
-            if (satisfies(expected, minTotalCount, actualCounts, actualTotal)) {
+            if (satisfied) {
                 progressReporter.report(stepRun, "Queue check '" + queueName + "' passed: " + actualDescription);
                 return;
             }
@@ -165,6 +175,34 @@ public class QueueCheckStepExecutor implements StepExecutor {
             }
             sleep(interval);
         }
+    }
+
+    private Map<String, Object> describeResult(
+            String queueName,
+            Map<String, Integer> expected,
+            Integer minTotalCount,
+            Map<String, Long> actualCounts,
+            List<ExchangeQueueValueDto> matching,
+            int maxRetray,
+            boolean passed) {
+        List<Map<String, Object>> transactions = new ArrayList<>();
+        for (ExchangeQueueValueDto item : matching.stream().limit(MAX_REPORTED_TRANSACTIONS).toList()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("naturalKey", item.naturalKey());
+            row.put("status", effectiveStatus(item, maxRetray).name());
+            row.put("retray", item.retrayOrZero());
+            transactions.add(row);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("queueName", queueName);
+        result.put("expected", new LinkedHashMap<>(expected));
+        result.put("minTotalCount", minTotalCount);
+        result.put("actual", new LinkedHashMap<>(actualCounts));
+        result.put("actualTotal", matching.size());
+        result.put("passed", passed);
+        result.put("transactions", transactions);
+        result.put("transactionsTotal", matching.size());
+        return result;
     }
 
     private Map<String, Long> countByStatus(List<ExchangeQueueValueDto> items, int maxRetray) {

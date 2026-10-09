@@ -10,7 +10,10 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "step_run")
@@ -72,6 +75,13 @@ public class StepRun {
     @Column(name = "detail_updated_at")
     private OffsetDateTime detailUpdatedAt;
 
+    /** Структурированный итог шага для отчёта (робот/задание у JOB, ожидалось/получено у
+     * QUEUE_CHECK и т.д.) — заполняется исполнителем шага, в отличие от {@code detail} это данные,
+     * а не текст для человека. Значения только JSON-безопасные (строки, числа, списки, мапы). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "result")
+    private Map<String, Object> result;
+
     protected StepRun() {
     }
 
@@ -106,6 +116,10 @@ public class StepRun {
     public void updateDetail(String detail) {
         this.detail = detail;
         this.detailUpdatedAt = OffsetDateTime.now();
+    }
+
+    public void setResult(Map<String, Object> result) {
+        this.result = result;
     }
 
     public void setOrchestratorAssignmentId(Integer orchestratorAssignmentId) {
@@ -174,5 +188,9 @@ public class StepRun {
 
     public OffsetDateTime getDetailUpdatedAt() {
         return detailUpdatedAt;
+    }
+
+    public Map<String, Object> getResult() {
+        return result;
     }
 }

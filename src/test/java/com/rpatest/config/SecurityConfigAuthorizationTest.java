@@ -63,7 +63,8 @@ import org.springframework.test.web.servlet.MockMvc;
  * дефолтной матрицей (та же, что засеяна миграцией V12), отдельные тесты меняют её на лету.
  */
 @WebMvcTest(controllers = {RunController.class, ScenarioController.class, AdminUserController.class,
-        AuthController.class, RolePermissionController.class, CleanupController.class, OrchestratorController.class})
+        AuthController.class, RolePermissionController.class, CleanupController.class, OrchestratorController.class,
+        com.rpatest.execution.web.RunReportController.class})
 @Import({SecurityConfig.class, PermissionAuthorization.class})
 class SecurityConfigAuthorizationTest {
 
@@ -84,6 +85,9 @@ class SecurityConfigAuthorizationTest {
 
     @MockBean
     private QueueAuditService queueAuditService;
+
+    @MockBean
+    private com.rpatest.execution.report.RunReportService runReportService;
 
     @MockBean
     private CleanupService cleanupService;
@@ -206,6 +210,19 @@ class SecurityConfigAuthorizationTest {
 
         when(rolePermissionService.permissionsOf(Role.VIEWER)).thenReturn(Set.of(Permission.SCENARIO_READ));
         mockMvc.perform(get("/api/v1/runs")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void runReportIsGuardedByRunReadPermission() throws Exception {
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now();
+        when(runReportService.get(1L)).thenReturn(new com.rpatest.execution.report.RunReportSnapshot(
+                1L, 5L, "s", "alice", RunStatus.SUCCEEDED, now, now, 0L, null, List.of(), List.of(), now));
+
+        mockMvc.perform(get("/api/v1/runs/1/report")).andExpect(status().isOk());
+
+        when(rolePermissionService.permissionsOf(Role.VIEWER)).thenReturn(Set.of(Permission.SCENARIO_READ));
+        mockMvc.perform(get("/api/v1/runs/1/report")).andExpect(status().isForbidden());
     }
 
     @Test

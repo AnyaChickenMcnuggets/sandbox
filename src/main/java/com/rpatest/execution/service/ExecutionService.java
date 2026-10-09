@@ -10,6 +10,7 @@ import com.rpatest.execution.domain.ScenarioRun;
 import com.rpatest.execution.domain.StepRun;
 import com.rpatest.execution.engine.ScenarioExecutionEngine;
 import com.rpatest.execution.repository.ScenarioRunRepository;
+import com.rpatest.execution.report.RunCompletionHandler;
 import com.rpatest.execution.repository.StepRunRepository;
 import com.rpatest.execution.web.RobotAvailabilityResponse;
 import com.rpatest.execution.web.RunResponse;
@@ -49,6 +50,7 @@ public class ExecutionService {
     private final AssignmentsPort assignmentsPort;
     private final RobotsPort robotsPort;
     private final OrchestratorProperties orchestratorProperties;
+    private final RunCompletionHandler completionHandler;
     private final Executor executor;
 
     public ExecutionService(
@@ -60,6 +62,7 @@ public class ExecutionService {
             AssignmentsPort assignmentsPort,
             RobotsPort robotsPort,
             OrchestratorProperties orchestratorProperties,
+            RunCompletionHandler completionHandler,
             @Qualifier("scenarioExecutionExecutor") Executor executor) {
         this.scenarioRepository = scenarioRepository;
         this.runRepository = runRepository;
@@ -69,6 +72,7 @@ public class ExecutionService {
         this.assignmentsPort = assignmentsPort;
         this.robotsPort = robotsPort;
         this.orchestratorProperties = orchestratorProperties;
+        this.completionHandler = completionHandler;
         this.executor = executor;
     }
 
@@ -117,7 +121,13 @@ public class ExecutionService {
         // пережить удаление сценария и не требовать отдельного GET .../scenarios/{id} на фронте.
         ScenarioRun run = runRepository.save(new ScenarioRun(scenarioId, triggeredBy, startStepId, scenario.getName()));
         Long runId = run.getId();
-        executor.execute(() -> engine.runScenario(runId, startStepId));
+        executor.execute(() -> {
+            try {
+                engine.runScenario(runId, startStepId);
+            } finally {
+                completionHandler.onRunFinished(runId);
+            }
+        });
         return toResponse(run, List.of());
     }
 

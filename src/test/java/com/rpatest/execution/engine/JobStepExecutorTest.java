@@ -274,6 +274,37 @@ class JobStepExecutorTest {
                 org.mockito.ArgumentMatchers.isNull());
     }
 
+    @Test
+    void recordsStructuredResultForTheReport() {
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
+        StepRun stepRun = new StepRun(10L, 5L);
+        AssignmentDto created = new AssignmentDto(42, "My_Job_10_5", "My Job", 3, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any(), any(), any())).thenReturn(successfulLaunch(42));
+
+        executor.execute(stepRun, step);
+
+        assertThat(stepRun.getResult())
+                .containsEntry("assignmentName", "My_Job_10_5")
+                .containsEntry("robotName", "robot-1")
+                .containsEntry("success", true)
+                .containsKeys("projectName", "robotStartedAt", "completedAt");
+    }
+
+    @Test
+    void recordsResultAlsoWhenTheAssignmentFailsOnTheRobot() {
+        ScenarioStep step = step(5L, "My Job", Map.of("rpaProjectId", 3));
+        StepRun stepRun = new StepRun(10L, 5L);
+        AssignmentDto created = new AssignmentDto(42, "My_Job_10_5", "My Job", 3, AssignmentStatus.NEW, null, null, null);
+        when(assignmentsPort.create(any())).thenReturn(created);
+        when(statusPoller.pollUntilTerminal(eq(stepRun), eq(42), any(), any(), any()))
+                .thenReturn(failedLaunch(42, "robot-9"));
+
+        assertThatThrownBy(() -> executor.execute(stepRun, step)).isInstanceOf(StepExecutionException.class);
+
+        assertThat(stepRun.getResult()).containsEntry("robotName", "robot-9").containsEntry("success", false);
+    }
+
     private RpaProjectLaunchDto successfulLaunch(int assignmentId) {
         LocalDateTime now = LocalDateTime.now();
         return new RpaProjectLaunchDto(1, 3, 9, "robot-1", assignmentId, now, now, true, null, now);

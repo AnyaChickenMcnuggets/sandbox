@@ -121,6 +121,38 @@ class QueueStepExecutorTest {
                 .hasMessageContaining("Queue");
     }
 
+    @Test
+    void recordsStructuredResultForTheReport() {
+        UUID queueId = UUID.randomUUID();
+        ScenarioStep step = step("My Queue", Map.of(
+                "name", "my_queue",
+                "transactions", List.of(Map.of("naturalKey", "k1", "value", "v1"), Map.of("naturalKey", "k2", "value", "v2"))));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(exchangeQueuesPort.findByName("my_queue"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 0, 0, null)));
+
+        executor.execute(stepRun, step);
+
+        assertThat(stepRun.getResult())
+                .containsEntry("queueName", "my_queue")
+                .containsEntry("created", true)
+                .containsEntry("transactionsAdded", 2);
+    }
+
+    @Test
+    void reportsReusedQueueAsNotCreated() {
+        UUID queueId = UUID.randomUUID();
+        ScenarioStep step = step("My Queue", Map.of("name", "my_queue"));
+        StepRun stepRun = new StepRun(10L, 5L);
+        when(exchangeQueuesPort.findByName("my_queue"))
+                .thenReturn(Optional.of(new ExchangeQueueDto(queueId, "my_queue", null, 3, 0, null)));
+
+        executor.execute(stepRun, step);
+
+        assertThat(stepRun.getResult()).containsEntry("created", false).containsEntry("transactionsAdded", 0);
+    }
+
     private ScenarioStep step(String name, Map<String, Object> config) {
         return new ScenarioStep(100L, ScenarioStepType.QUEUE, name, config, 0);
     }

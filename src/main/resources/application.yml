@@ -108,6 +108,20 @@ resilience4j:
         wait-duration-in-open-state: 30s
         permitted-number-of-calls-in-half-open-state: 5
 
+report:
+  notification:
+    # Письмо о завершении прогона тому, кто его запустил: транзакция в очереди почтовика
+    # оркестратора (Mail_To = логин запустившего). По умолчанию ВЫКЛЮЧЕНО - включайте явно, это
+    # реальная отправка писем. Очередь должна уже существовать на оркестраторе (мы её не создаём).
+    enabled: ${REPORT_NOTIFICATION_ENABLED:false}
+    queue-name: ${REPORT_NOTIFICATION_QUEUE:SND}
+    value: Sandbox
+    # Домен почты: Mail_To = логин запустившего + "@" + домен (логин, уже содержащий @, не меняется).
+    # Пусто - логин уходит как есть. Реальное значение - через переменную окружения.
+    mail-domain: ${REPORT_MAIL_DOMAIN:}
+    # Адрес сервиса так, как его видят пользователи (https://host:8443). Пусто - в письме нет ссылки.
+    public-base-url: ${REPORT_PUBLIC_BASE_URL:}
+
 execution:
   async:
     core-pool-size: 4
